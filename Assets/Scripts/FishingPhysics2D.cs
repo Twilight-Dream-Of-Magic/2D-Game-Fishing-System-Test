@@ -46,12 +46,7 @@ public class FishingPhysics2D : MonoBehaviour
 	public Rigidbody2D bobber;            // 浮标（CircleCollider2D）
 	public DistanceJoint2D rope;          // 挂在 bobber 上，connectedBody=rodTip
 
-    [Header("Cast Tuning")]
-    [Min(0.01f)] public float minCast = 1.8f;
-    [Min(0.01f)] public float maxCast = 7.2f;
-    [Tooltip("每秒蓄力进度 0..1")] public float chargeSpeed = 1.6f;
-    [Tooltip("用于估计额外前向速度的时间窗")] public float flightTime = 0.35f;
-    [Tooltip("最小飞行时间（早于此不落水判定）")] public float landTimeout = 0.45f;
+    // Cast Tuning — removed; replaced by Rope Simple Control params
 
     [Header("Drag (Unity 6 uses linearDamping)")]
     public float airDrag = 0.38f;
@@ -218,13 +213,13 @@ public class FishingPhysics2D : MonoBehaviour
 		ResetAll(true);
 	}
 
-	void OnValidate()
-	{
-		maxCast = Mathf.Max(maxCast, minCast + 0.01f);
-		lineSegments = Mathf.Clamp(lineSegments, 2, 128);
-		pixelsPerUnit = Mathf.Max(16, pixelsPerUnit);
-		if (lr) ConfigureLine();
-	}
+    void OnValidate()
+    {
+        ropeMaxLen = Mathf.Max(ropeMaxLen, ropeMinLen + 0.01f);
+        lineSegments = Mathf.Clamp(lineSegments, 2, 128);
+        pixelsPerUnit = Mathf.Max(16, pixelsPerUnit);
+        if (lr) ConfigureLine();
+    }
 
 	// 物理步里**直接**用刚体求竿梢速度（旋转→切向速度）
 	void FixedUpdate()
@@ -290,7 +285,8 @@ public class FishingPhysics2D : MonoBehaviour
 
         // 目标后仰角（按蓄力幅度）
         float t = Mathf.Pow(Mathf.Clamp01(charge01), Mathf.Max(0.0001f, powerCurve));
-        float targetDeg = -Mathf.Abs(maxBackAngleDeg) * t * side;
+        // 镜像旋转鱼竿：右手后仰=负，左手后仰=正 → 加镜像取反 side
+        float targetDeg = -Mathf.Abs(maxBackAngleDeg) * t * (-side);
         if (enforceRodLimits)
         {
             targetDeg = Mathf.Clamp(targetDeg, rodMinAngleDeg, rodMaxAngleDeg);
