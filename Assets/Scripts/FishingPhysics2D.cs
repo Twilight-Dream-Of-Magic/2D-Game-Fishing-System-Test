@@ -73,6 +73,10 @@ public class FishingPhysics2D : MonoBehaviour
     [Tooltip("解析额外速度增益")] public float extraBoost = 1.1f;
     [Tooltip("蓄力曲线 >1 变硬，<1 变软")] public float powerCurve = 1.20f;
 
+    [Header("Launch Feel（竿身旋转）")]
+    [Tooltip("蓄满时的最大后仰角（度，负值为向后）")] public float maxBackAngleDeg = 55f;
+    [Tooltip("Charging 时竿身旋转的平滑时间（秒）")] public float rotationSmoothTime = 0.06f;
+
     [Header("Flight Lock（视觉友好落水）")]
     [Tooltip("飞行允许的额外松弛比例")][Range(0f, 0.5f)] public float slackRatio = 0.06f;
     [Tooltip("连续多少帧“已绷紧”就直接落水")][Range(1, 8)] public int tautFramesToLand = 2;
@@ -113,6 +117,10 @@ public class FishingPhysics2D : MonoBehaviour
 
 	// 竿梢“真实”速度（由 Seg3 刚体在 FixedUpdate 计算）
 	Vector2 tipVelFixed;
+
+    // Charging 阶段的竿身后仰控制（避免 360° 抖动）
+    float currentBackAngleDeg;
+    float rotSmoothVelDeg;
 
 	// Home Pose 快照
 	struct TPose
@@ -234,10 +242,19 @@ public class FishingPhysics2D : MonoBehaviour
         Debug.Log("[Fishing] Charging start", this);
 	}
 
-	void TickCharging(float dt)
+    void TickCharging(float dt)
 	{
-		charge01 = Mathf.Min(1f, charge01 + Mathf.Max(0f, chargeSpeed) * dt);
-		if (chargeSlider) chargeSlider.value = charge01;
+        charge01 = Mathf.Min(1f, charge01 + Mathf.Max(0f, chargeSpeed) * dt);
+        if (chargeSlider) chargeSlider.value = charge01;
+
+        // 禁用根节马达，Charging 仅用确定性后仰角呈现
+        if (hinge1) hinge1.useMotor = false;
+
+        // 目标后仰角（负角度表示向后），使用 SmoothDampAngle 消除 360° 跳变
+        float t = Mathf.Pow(Mathf.Clamp01(charge01), Mathf.Max(0.0001f, powerCurve));
+        float targetDeg = -Mathf.Abs(maxBackAngleDeg) * t;
+        currentBackAngleDeg = Mathf.SmoothDampAngle(currentBackAngleDeg, targetDeg, ref rotSmoothVelDeg, Mathf.Max(0.0001f, rotationSmoothTime));
+        ApplySeg1BackAngle(currentBackAngleDeg);
 	}
 
     void BeginWhip()
@@ -538,6 +555,15 @@ void RestoreRodPoseOnly()
 			bobber.transform.localPosition = Vector3.zero;
 		}
 }
+    // 将 seg1 的局部旋转设置为“home 旋转 + 指定 Z 角度”，避免角度累加导致 360° 旋转
+    void ApplySeg1BackAngle(float backDeg)
+    {
+        if (!seg1) return;
+        var oldType = seg1.bodyType;
+        seg1.bodyType = RigidbodyType2D.Kinematic; // 防止物理帧对 Transform 覆写
+        seg1.transform.localRotation = seg1Home.rot * Quaternion.Euler(0f, 0f, backDeg);
+        seg1.bodyType = oldType;
+    }
     // --------------------------- 竿前倾保持 ---------------------------
     void HoldRodForwardTemporarily()
     {
