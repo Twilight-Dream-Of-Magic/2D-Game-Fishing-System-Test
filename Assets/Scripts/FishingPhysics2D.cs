@@ -202,47 +202,21 @@ public class FishingPhysics2D : MonoBehaviour
 	}
 
 	// --------------------------- 主循环 ---------------------------
-	void Update()
-	{
-		// 右键紧急复位
-		if (Input.GetMouseButtonDown(1)) { ResetAll(snapRodAlsoFromEmergencyReset); return; }
+    void Update()
+    {
+        // 右键紧急复位
+        if (Input.GetMouseButtonDown(1)) { ResetAll(snapRodAlsoFromEmergencyReset); return; }
 
-		switch (phase)
-		{
-			case Phase.Idle:
-				if (Input.GetMouseButtonDown(0)) BeginCharging();
-				break;
+        // 把阶段逻辑分发给 fsm（内部仍调用当前类的方法）
+        fsm.Tick(this, Time.deltaTime);
 
-			case Phase.Charging:
-				TickCharging(Time.deltaTime);
-				if (Input.GetMouseButtonUp(0)) BeginWhip();
-				break;
+        // Pre-Release：刚性整体
+        EnsureAttachedDuringPreRelease();
 
-			case Phase.Whip:
-				TickWhip(Time.deltaTime);
-				break;
-
-			case Phase.Flight:
-				TickFlight(Time.deltaTime);
-				TryBeginReelFromFlight();
-				break;
-
-			case Phase.Landed:
-				if (Input.GetMouseButtonDown(0)) BeginReel();
-				break;
-
-			case Phase.Reeling:
-				TickReeling(Time.deltaTime);
-				break;
-		}
-
-		// Pre-Release：刚性整体
-		EnsureAttachedDuringPreRelease();
-
-		TickUiFade(Time.deltaTime);
-		UpdateLineRenderer();
-		Watchdog();
-	}
+        TickUiFade(Time.deltaTime);
+        UpdateLineRenderer();
+        Watchdog();
+    }
 
 	// --------------------------- 状态实现 ---------------------------
     void BeginCharging()
@@ -808,6 +782,32 @@ void RestoreRodPoseOnly()
         public Phase current;
         public void Init(Phase initial) { current = initial; }
         public void Set(Phase next) { current = next; }
+        public void Tick(FishingPhysics2D ctx, float dt)
+        {
+            switch (current)
+            {
+                case Phase.Idle:
+                    if (Input.GetMouseButtonDown(0)) ctx.BeginCharging();
+                    break;
+                case Phase.Charging:
+                    ctx.TickCharging(dt);
+                    if (Input.GetMouseButtonUp(0)) ctx.BeginWhip();
+                    break;
+                case Phase.Whip:
+                    ctx.TickWhip(dt);
+                    break;
+                case Phase.Flight:
+                    ctx.TickFlight(dt);
+                    ctx.TryBeginReelFromFlight();
+                    break;
+                case Phase.Landed:
+                    if (Input.GetMouseButtonDown(0)) ctx.BeginReel();
+                    break;
+                case Phase.Reeling:
+                    ctx.TickReeling(dt);
+                    break;
+            }
+        }
     }
 
     // --------------------------- 配置容器 ---------------------------
