@@ -37,8 +37,9 @@ public class FishingPhysics2D : MonoBehaviour
 	public Slider chargeSlider;
 	public LayerMask waterMask;
 
-	[Header("Rod Chain (refs)")]
-	public Rigidbody2D seg1, seg2, seg3, rodTip;
+    [Header("Rod Chain (refs)")]
+    public Transform RodRoot; // 根节点（旋转枢轴）
+    public Rigidbody2D seg1, seg2, seg3, rodTip;
 	public HingeJoint2D hinge1, hinge2, hinge3;
 
 	[Header("Bobber & Rope (refs)")]
@@ -123,9 +124,10 @@ public class FishingPhysics2D : MonoBehaviour
 	// 竿梢“真实”速度（由 Seg3 刚体在 FixedUpdate 计算）
 	Vector2 tipVelFixed;
 
-    // Charging 阶段的竿身后仰控制（避免 360° 抖动）
+    // Charging 阶段围绕 RodRoot 的后仰控制（避免 360° 抖动）
     float currentBackAngleDeg;
     float rotSmoothVelDeg;
+    Quaternion rodRootHomeRot;
 
 	// Home Pose 快照
 	struct TPose
@@ -441,12 +443,13 @@ public class FishingPhysics2D : MonoBehaviour
 	void CaptureHome()
 	{
 		if (homeCaptured || seg1 == null || seg2 == null || seg3 == null || rodTip == null || bobber == null) return;
-		seg1Home = new TPose(seg1.transform);
+        seg1Home = new TPose(seg1.transform);
 		seg2Home = new TPose(seg2.transform);
 		seg3Home = new TPose(seg3.transform);
 		tipHome = new TPose(rodTip.transform);
 		bobberHome = new TPose(bobber.transform);
 		homeCaptured = true;
+        if (RodRoot) rodRootHomeRot = RodRoot.localRotation;
 	}
 
 	void RestoreHomePoseInstant()
@@ -459,6 +462,7 @@ public class FishingPhysics2D : MonoBehaviour
 		seg3Home.Apply(seg3.transform);
 		tipHome.Apply(rodTip.transform);
 		seg1.bodyType = b1; seg2.bodyType = b2; seg3.bodyType = b3;
+        if (RodRoot) RodRoot.localRotation = rodRootHomeRot;
 		AttachToTipKeepWorld();
 		bobber.transform.localPosition = Vector3.zero;
 	}
@@ -564,19 +568,15 @@ void RestoreRodPoseOnly()
 			bobber.transform.localPosition = Vector3.zero;
 		}
 }
-    // 将 seg1 的局部旋转设置为“home 旋转 + 指定 Z 角度”，避免角度累加导致 360° 旋转
+    // 围绕 RodRoot 旋转（不再直接旋转 seg1）
     void ApplySeg1BackAngle(float backDeg)
     {
-        if (!seg1) return;
-        // 硬限制角度范围（即使外部参数失控也不越界）
+        if (!RodRoot) return;
+        // 硬限制角度范围
         if (enforceRodLimits)
             backDeg = Mathf.Clamp(backDeg, rodMinAngleDeg, rodMaxAngleDeg);
-
-        // 保持世界位姿中的局部旋转基于 home，加角度不累加
-        var oldType = seg1.bodyType;
-        seg1.bodyType = RigidbodyType2D.Kinematic; // 防止物理帧对 Transform 覆写
-        seg1.transform.localRotation = seg1Home.rot * Quaternion.Euler(0f, 0f, backDeg);
-        seg1.bodyType = oldType;
+        // 基于 RodRoot 的 home 旋转
+        RodRoot.localRotation = rodRootHomeRot * Quaternion.Euler(0f, 0f, backDeg);
     }
     // --------------------------- 竿前倾保持 ---------------------------
     void HoldRodForwardTemporarily()
