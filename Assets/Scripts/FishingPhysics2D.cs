@@ -340,6 +340,10 @@ public class FishingPhysics2D : MonoBehaviour
         // 视口外溢：如果仅水面落水关闭，则强制落水；否则放行由水面判定
         if (!landOnlyOnWater && IsOffscreen(bobber.position, offscreenMargin)) { ForceLand(); return; }
 
+        // 立即水面落水：若启用“仅水面落水”，一旦命中水层立刻锁长
+        bool inWaterNow = Physics2D.OverlapPoint(bobber.position, waterMask) != null;
+        if (landOnlyOnWater && inWaterNow) { ForceLand(); return; }
+
 		float tipTo = Vector2.Distance(rodTip.position, bobber.position);
 		bool tight = tipTo >= rope.distance - 0.01f;
 		tautFrames = tight ? (tautFrames + 1) : 0;
@@ -355,7 +359,7 @@ public class FishingPhysics2D : MonoBehaviour
         // - 否则：命中水面，或已绷紧且速度回向竿梢
 		if (castTimer >= landTimeout)
 		{
-			bool inWater = Physics2D.OverlapPoint(bobber.position, waterMask) != null;
+            bool inWater = inWaterNow;
 			Vector2 toTip = (Vector2)rodTip.position - bobber.position;
 			bool inward = Vector2.Dot(toTip, bobber.linearVelocity) > 0f
 						  || bobber.linearVelocity.sqrMagnitude < 0.0004f;
@@ -373,7 +377,7 @@ public class FishingPhysics2D : MonoBehaviour
     void ForceLand()
 	{
 		float cur = Vector2.Distance(rodTip.position, bobber.position);
-		if (rope) { rope.enabled = true; rope.maxDistanceOnly = true; rope.distance = cur; }
+        if (rope) { rope.enabled = true; rope.maxDistanceOnly = false; rope.distance = cur; }
 		bobber.linearVelocity = Vector2.zero;
 		bobber.angularVelocity = 0f;
 		bobber.linearDamping = waterDrag;
