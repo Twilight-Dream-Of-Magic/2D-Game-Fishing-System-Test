@@ -129,6 +129,9 @@ public class FishingPhysics2D : MonoBehaviour
 
 	// 竿梢“真实”速度（由 Seg3 刚体在 FixedUpdate 计算）
 	Vector2 tipVelFixed;
+    // 鼠标决定的当前抛投方向（相对竿梢）和左右符号
+    Vector2 castDirCached = Vector2.right;
+    float sideSignCached = 1f; // 右:+1，左:-1
 
     // Charging 阶段围绕 RodRoot 的后仰控制（避免 360° 抖动）
     float currentBackAngleDeg;
@@ -231,6 +234,9 @@ public class FishingPhysics2D : MonoBehaviour
         // 右键紧急复位（先彻底取消所有延迟/协程）
         if (Input.GetMouseButtonDown(1)) { CancelInvoke(); StopAllCoroutines(); ResetAll(snapRodAlsoFromEmergencyReset); return; }
 
+        // 统一更新一次基于鼠标的抛投方向/左右符号（供全流程使用）
+        UpdateCastDirCached();
+
         // 把阶段逻辑分发给 fsm（内部仍调用当前类的方法）
         fsm.Tick(this, Time.deltaTime);
 
@@ -270,10 +276,8 @@ public class FishingPhysics2D : MonoBehaviour
         if (hinge1) hinge1.useMotor = false;
 
         // 依据鼠标方向确定“前/后”的符号（右为前→后仰为负；左为前→后仰为正）
-        Vector2 origin = rodTip ? (Vector2)rodTip.position : (Vector2)transform.position;
-        Vector2 mouse = Camera.main ? (Vector2)Camera.main.ScreenToWorldPoint(Input.mousePosition) : origin + Vector2.right;
-        Vector2 castDir = (mouse - origin).sqrMagnitude > 1e-6f ? (mouse - origin).normalized : Vector2.right;
-        float sideSign = Mathf.Sign(Mathf.Abs(castDir.x) < 1e-4f ? 1f : castDir.x); // 右:+1，左:-1
+        // 依据统一缓存的鼠标方向与左右
+        float sideSign = sideSignCached;
 
         // 目标后仰角（按蓄力幅度）
         float t = Mathf.Pow(Mathf.Clamp01(charge01), Mathf.Max(0.0001f, powerCurve));
@@ -302,14 +306,11 @@ public class FishingPhysics2D : MonoBehaviour
 		whipT += dt;
 		bobber.transform.localPosition = Vector3.zero;
 
-		Vector2 origin = rodTip ? (Vector2)rodTip.position : (Vector2)transform.position;
-		Vector2 mouse = Camera.main ? (Vector2)Camera.main.ScreenToWorldPoint(Input.mousePosition) : origin + Vector2.right;
-		Vector2 castDir = (mouse - origin).sqrMagnitude > 1e-6f ? (mouse - origin).normalized : Vector2.right;
-        float sideSign = Mathf.Sign(Mathf.Abs(castDir.x) < 1e-4f ? 1f : castDir.x); // 右:+1，左:-1
+        float sideSign = sideSignCached;
 
 		// 用 FixedUpdate 缓存的真实竿梢速度
 		Vector2 vTip = tipVelFixed;
-		float tipFwd = (vTip.sqrMagnitude < 1e-6f) ? -999f : Vector2.Dot(vTip.normalized, castDir);
+        float tipFwd = (vTip.sqrMagnitude < 1e-6f) ? -999f : Vector2.Dot(vTip.normalized, castDirCached);
 		bool apex = releaseAtForwardApex && tipFwdPrev > -998f && tipFwdPrev > tipFwd; // 前向速度开始回落
 		tipFwdPrev = tipFwd;
 
@@ -323,7 +324,7 @@ public class FishingPhysics2D : MonoBehaviour
             ApplySeg1BackAngle(currentBackAngleDeg);
         }
 
-		if (apex || whipT >= whipPulse) ReleaseNow(castDir, vTip);
+        if (apex || whipT >= whipPulse) ReleaseNow(castDirCached, vTip);
 	}
 
     void ReleaseNow(Vector2 castDir, Vector2 vTip)
@@ -607,6 +608,14 @@ void RestoreRodPoseOnly()
 			bobber.transform.localPosition = Vector3.zero;
 		}
 }
+    // 统一更新鼠标方向缓存（相对竿梢）
+    void UpdateCastDirCached()
+    {
+        Vector2 origin = rodTip ? (Vector2)rodTip.position : (Vector2)transform.position;
+        Vector2 mouse = Camera.main ? (Vector2)Camera.main.ScreenToWorldPoint(Input.mousePosition) : origin + Vector2.right;
+        castDirCached = (mouse - origin).sqrMagnitude > 1e-6f ? (mouse - origin).normalized : Vector2.right;
+        sideSignCached = Mathf.Sign(Mathf.Abs(castDirCached.x) < 1e-4f ? 1f : castDirCached.x);
+    }
     // 围绕 RodRoot 旋转（不再直接旋转 seg1）
     void ApplySeg1BackAngle(float backDeg)
     {
