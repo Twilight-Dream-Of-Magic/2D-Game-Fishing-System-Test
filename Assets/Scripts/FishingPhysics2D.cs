@@ -73,6 +73,7 @@ public class FishingPhysics2D : MonoBehaviour
     [Tooltip("飞行允许的额外松弛比例")][Range(0f, 0.5f)] public float slackRatio = 0.06f;
     [Tooltip("连续多少帧“已绷紧”就直接落水")][Range(1, 8)] public int tautFramesToLand = 2;
     [Tooltip("离屏外溢容差（0~0.2）")][Range(0f, 0.2f)] public float offscreenMargin = 0.05f;
+    [Tooltip("只在命中水面时判定落水（演示需求：抛进水里就结束）")] public bool landOnlyOnWater = true;
 
     [Header("Line Renderer")]
     [Min(2)] public int lineSegments = 20;
@@ -322,24 +323,29 @@ public class FishingPhysics2D : MonoBehaviour
 		castTimer += dt;
 		if (!bobber || !rope || !rodTip) return;
 
-		// 视口外溢：强制落水（避免“飞出屏外还不落”）
-		if (IsOffscreen(bobber.position, offscreenMargin)) { ForceLand(); return; }
+        // 视口外溢：如果仅水面落水关闭，则强制落水；否则放行由水面判定
+        if (!landOnlyOnWater && IsOffscreen(bobber.position, offscreenMargin)) { ForceLand(); return; }
 
 		float tipTo = Vector2.Distance(rodTip.position, bobber.position);
 		bool tight = tipTo >= rope.distance - 0.01f;
 		tautFrames = tight ? (tautFrames + 1) : 0;
 
-		// 拉紧若干帧就落水（视觉友好）
-		if (tautFrames >= Mathf.Max(1, tautFramesToLand) && castTimer >= landTimeout * 0.4f) { ForceLand(); return; }
+        // 如果是只在水面落水，则忽略“拉紧落水”规则
+        if (!landOnlyOnWater)
+        {
+            if (tautFrames >= Mathf.Max(1, tautFramesToLand) && castTimer >= landTimeout * 0.4f) { ForceLand(); return; }
+        }
 
-		// 到时后落水：命中水面，或已绷紧且速度回向竿梢
+        // 到时后落水：
+        // - landOnlyOnWater=true：命中水面才落
+        // - 否则：命中水面，或已绷紧且速度回向竿梢
 		if (castTimer >= landTimeout)
 		{
 			bool inWater = Physics2D.OverlapPoint(bobber.position, waterMask) != null;
 			Vector2 toTip = (Vector2)rodTip.position - bobber.position;
 			bool inward = Vector2.Dot(toTip, bobber.linearVelocity) > 0f
 						  || bobber.linearVelocity.sqrMagnitude < 0.0004f;
-			if (inWater || (tight && inward)) ForceLand();
+            if ((landOnlyOnWater && inWater) || (!landOnlyOnWater && (inWater || (tight && inward)))) ForceLand();
 		}
 	}
 
