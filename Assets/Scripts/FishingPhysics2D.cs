@@ -91,6 +91,9 @@ public class FishingPhysics2D : MonoBehaviour
     [Tooltip("命中水后需要停留的最短时间，避免“刚碰水就落”")] public float waterSettleDelay = 0.2f;
     [Tooltip("水中锁长的速度阈值，低于则可落")] public float waterLockSpeed = 0.8f;
 
+    [Header("Rope Unleash（起始放开再闭合）")]
+    [Tooltip("释放后绳子完全放开的时长（秒）")] public float ropeUnleashTime = 0.15f;
+
     [Header("Line Renderer")]
     [Min(2)] public int lineSegments = 20;
 	[Min(16)] public int pixelsPerUnit = 128;
@@ -342,12 +345,13 @@ public class FishingPhysics2D : MonoBehaviour
         Vector2 vInit = vTip * Mathf.Max(0f, tipBoost) + castDir.normalized * v0 * Mathf.Max(0f, extraBoost);
 		bobber.linearVelocity = vInit;
 
-		// 飞行：严格“最大长度上限”，略加松弛
+        // 飞行：起始阶段完全放开（不设上限），随后再恢复“最大长度上限”
 		if (rope)
 		{
 			rope.enabled = true;
-			rope.maxDistanceOnly = true;
-			rope.distance = Mathf.Min(plannedLen * (1f + Mathf.Abs(slackRatio)), maxCast);
+            rope.maxDistanceOnly = false; // 完全放开
+            rope.distance = 1e6f;         // 足够大
+            if (ropeUnleashTime > 0f) Invoke(nameof(ReapplyRopeMaxLimit), Mathf.Clamp(ropeUnleashTime, 0.01f, 1.0f));
 		}
 
         ChangePhase(Phase.Flight);
@@ -412,7 +416,7 @@ public class FishingPhysics2D : MonoBehaviour
     void ForceLand()
 	{
 		float cur = Vector2.Distance(rodTip.position, bobber.position);
-        if (rope) { rope.enabled = true; rope.maxDistanceOnly = false; rope.distance = cur; }
+        if (rope) { rope.enabled = true; rope.maxDistanceOnly = false; rope.distance = cur; CancelInvoke(nameof(ReapplyRopeMaxLimit)); }
 		bobber.linearVelocity = Vector2.zero;
 		bobber.angularVelocity = 0f;
 		bobber.linearDamping = waterDrag;
@@ -455,6 +459,14 @@ public class FishingPhysics2D : MonoBehaviour
         if (events?.onReelStart != null) events.onReelStart.Invoke();
         Debug.Log("[Fishing] Reel start", this);
 	}
+
+    // 在起始完全放开后，恢复到“最大长度上限”并设置目标上限为 plannedLen*(1+slack)
+    void ReapplyRopeMaxLimit()
+    {
+        if (!rope || !rodTip || !bobber) return;
+        rope.maxDistanceOnly = true;
+        rope.distance = Mathf.Min(plannedLen * (1f + Mathf.Abs(slackRatio)), maxCast);
+    }
 
 	void TickReeling(float dt)
 	{
