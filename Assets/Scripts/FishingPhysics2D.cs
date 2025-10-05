@@ -2,9 +2,9 @@
 // FishingPhysics2D.cs — Unity 6 (6000.x)  重构版（完整替换）
 // 关键修复：
 //  - 竿梢速度在 FixedUpdate 采样并注入（不再出现 vTip=0）
-//  - 释放后让整条鱼竿保持“前倾”静止，直到收线或复位
 //  - Flight 严格“松绳上限” + 早落水（绷紧若干帧 / 离屏）
-//  - 随时左键可“强制开始收线”（不必等超时）
+//  - 可选：随时左键“强制开始收线”（reelAnytime）
+//  - 可选：抛出后短暂保持竿“前倾”稳定（holdRodForward）
 //  - Launch Feel：tipBoost / extraBoost / powerCurve 可调
 // Inspector 字段名保持与你现场一致
 // =========================================================
@@ -29,49 +29,58 @@ public class FishingPhysics2D : MonoBehaviour
 	public Rigidbody2D bobber;            // 浮标（CircleCollider2D）
 	public DistanceJoint2D rope;          // 挂在 bobber 上，connectedBody=rodTip
 
-	[Header("Cast Tuning")]
-	[Min(0.01f)] public float minCast = 1.5f;
-	[Min(0.01f)] public float maxCast = 8f;
-	[Tooltip("每秒蓄力进度 0..1")] public float chargeSpeed = 1.6f;
-	[Tooltip("用于估计额外前向速度的时间窗")] public float flightTime = 0.35f;
-	[Tooltip("最小飞行时间（早于此不落水判定）")] public float landTimeout = 0.35f;
+    [Header("Cast Tuning")]
+    [Min(0.01f)] public float minCast = 1.6f;
+    [Min(0.01f)] public float maxCast = 7.5f;
+    [Tooltip("每秒蓄力进度 0..1")] public float chargeSpeed = 1.6f;
+    [Tooltip("用于估计额外前向速度的时间窗")] public float flightTime = 0.35f;
+    [Tooltip("最小飞行时间（早于此不落水判定）")] public float landTimeout = 0.45f;
 
-	[Header("Drag (Unity 6 uses linearDamping)")]
-	public float airDrag = 0.4f;
-	public float waterDrag = 4f;
+    [Header("Drag (Unity 6 uses linearDamping)")]
+    public float airDrag = 0.4f;
+    public float waterDrag = 4.5f;
 
-	[Header("Reel Tuning")]
-	[Tooltip("distance 每秒缩短量")] public float reelRate = 6f;
-	[Tooltip("沿绳方向额外拉力")] public float reelForce = 12f;
+    [Header("Reel Tuning")]
+    [Tooltip("distance 每秒缩短量")] public float reelRate = 6.5f;
+    [Tooltip("沿绳方向额外拉力")] public float reelForce = 14f;
 
-	[Header("Whip（甩竿）")]
-	public float whipMotorSpeed = 1400f;
-	public float whipPulse = 0.10f;
-	public bool releaseAtForwardApex = true;
+    [Header("Whip（甩竿）")]
+    public float whipMotorSpeed = 1450f;
+    public float whipPulse = 0.14f;
+    public bool releaseAtForwardApex = true;
 
-	[Header("Flight Gravity")]
-	[Tooltip("飞行期的重力系数（顶视角 0.10~0.30）")] public float flightGravity = 0.15f;
+    [Header("Flight Gravity")]
+    [Tooltip("飞行期的重力系数（顶视角 0.10~0.30）")] public float flightGravity = 0.18f;
 
-	[Header("Launch Feel（手感增强）")]
-	[Tooltip("竿梢速度增益")] public float tipBoost = 1.6f;
-	[Tooltip("解析额外速度增益")] public float extraBoost = 1.1f;
-	[Tooltip("蓄力曲线 >1 变硬，<1 变软")] public float powerCurve = 1.15f;
+    [Header("Launch Feel（手感增强）")]
+    [Tooltip("竿梢速度增益")] public float tipBoost = 1.6f;
+    [Tooltip("解析额外速度增益")] public float extraBoost = 1.1f;
+    [Tooltip("蓄力曲线 >1 变硬，<1 变软")] public float powerCurve = 1.20f;
 
-	[Header("Flight Lock（视觉友好落水）")]
-	[Tooltip("飞行允许的额外松弛比例")][Range(0f, 0.5f)] public float slackRatio = 0.08f;
-	[Tooltip("连续多少帧“已绷紧”就直接落水")][Range(1, 8)] public int tautFramesToLand = 2;
-	[Tooltip("离屏外溢容差（0~0.2）")][Range(0f, 0.2f)] public float offscreenMargin = 0.04f;
+    [Header("Flight Lock（视觉友好落水）")]
+    [Tooltip("飞行允许的额外松弛比例")][Range(0f, 0.5f)] public float slackRatio = 0.06f;
+    [Tooltip("连续多少帧“已绷紧”就直接落水")][Range(1, 8)] public int tautFramesToLand = 2;
+    [Tooltip("离屏外溢容差（0~0.2）")][Range(0f, 0.2f)] public float offscreenMargin = 0.05f;
 
-	[Header("Line Renderer")]
-	[Min(2)] public int lineSegments = 16;
+    [Header("Line Renderer")]
+    [Min(2)] public int lineSegments = 20;
 	[Min(16)] public int pixelsPerUnit = 128;
 	public int sortingOrder = 10;
 	public Color lineColor = new Color(1f, 0.1f, 0.6f, 1f);
 	public bool drawDebugLine = true;
 
-	[Header("Home Pose（复位外观）")]
-	public bool snapRodOnReelFinish = true;
-	public bool snapRodAlsoFromEmergencyReset = true;
+    [Header("Home Pose（复位外观）")]
+    public bool snapRodOnReelFinish = true;
+    public bool snapRodAlsoFromEmergencyReset = true;
+
+    [Header("Interaction（交互开关）")]
+    [Tooltip("飞行期左键是否可随时强制收线（不等超时/绷紧）")] public bool reelAnytime = true;
+
+    [Header("Rod Forward Hold（抛出后前倾保持）")]
+    [Tooltip("抛出后短时间把根节角度限制在前倾区间")] public bool holdRodForward = true;
+    [Tooltip("保持时长（秒）")] public float holdForwardDuration = 0.6f;
+    [Tooltip("相对释放瞬间角度，允许后仰的角度上限（度）")] [Range(0f, 90f)] public float holdRodBackLimit = 40f;
+    [Tooltip("相对释放瞬间角度，允许前倾的角度上限（度）")] [Range(0f, 90f)] public float holdRodForwardLimit = 25f;
 
 	// ------------------------- 内部状态 -------------------------
 	enum Phase { Idle, Charging, Whip, Flight, Landed, Reeling }
@@ -95,6 +104,12 @@ public class FishingPhysics2D : MonoBehaviour
 	}
 	TPose seg1Home, seg2Home, seg3Home, tipHome, bobberHome;
 	bool homeCaptured;
+
+    // Hinge 恢复快照（用于 holdRodForward 临时限制）
+    bool hingeHoldActive;
+    bool hingePrevUseLimits, hingePrevUseMotor;
+    JointAngleLimits2D hingePrevLimits;
+    JointMotor2D hingePrevMotor;
 
 	// ------------------------- 生命周期 -------------------------
 	void Awake()
@@ -270,6 +285,9 @@ public class FishingPhysics2D : MonoBehaviour
 		castTimer = 0f; tautFrames = 0;
 
 		Debug.Log($"[Fishing] RELEASE vTip={vTip.magnitude:F2} v0={v0:F2}", this);
+
+        // 抛出后短暂保持前倾（可选）
+        if (holdRodForward) HoldRodForwardTemporarily();
 	}
 
 	void TickFlight(float dt)
@@ -319,13 +337,24 @@ public class FishingPhysics2D : MonoBehaviour
 
 	void TryBeginReelFromFlight()
 	{
-		if (!Input.GetMouseButtonDown(0) || phase != Phase.Flight || rope == null || rodTip == null) return;
-		if (castTimer < landTimeout) return;
-		float tipTo = Vector2.Distance(rodTip.position, bobber.position);
-		if (tipTo < rope.distance - 0.02f) return; // 未绷紧
-		ForceLand();
-		BeginReel();
-		Debug.Log("[Fishing] Begin reel from Flight (tight & timeout)", this);
+        if (!Input.GetMouseButtonDown(0) || phase != Phase.Flight || rope == null || rodTip == null) return;
+
+        if (reelAnytime)
+        {
+            // 直接强制落水并开始收线
+            ForceLand();
+            BeginReel();
+            Debug.Log("[Fishing] Begin reel from Flight (anytime)", this);
+            return;
+        }
+
+        // 原有逻辑：超时且已绷紧
+        if (castTimer < landTimeout) return;
+        float tipTo = Vector2.Distance(rodTip.position, bobber.position);
+        if (tipTo < rope.distance - 0.02f) return; // 未绷紧
+        ForceLand();
+        BeginReel();
+        Debug.Log("[Fishing] Begin reel from Flight (tight & timeout)", this);
 	}
 
 	void BeginReel()
@@ -407,7 +436,11 @@ public class FishingPhysics2D : MonoBehaviour
 
 		if (chargeSlider) { chargeSlider.value = 0f; chargeSlider.gameObject.SetActive(false); }
 
-		if (snapRod) RestoreHomePoseInstant();
+        if (snapRod) RestoreHomePoseInstant();
+
+        // 还原 Hinge 任何临时保持
+        CancelInvoke(nameof(ReleaseHoldRodForward));
+        ReleaseHoldRodForward();
 
 		lr.enabled = false;
 		UpdateLineRenderer();
@@ -443,6 +476,44 @@ public class FishingPhysics2D : MonoBehaviour
 			if (bobber.transform.parent != rodTip.transform) AttachToTipKeepWorld();
 			bobber.transform.localPosition = Vector3.zero;
 		}
+
+    // --------------------------- 竿前倾保持 ---------------------------
+    void HoldRodForwardTemporarily()
+    {
+        if (!hinge1 || hingeHoldActive) return;
+
+        // 记录当前设置
+        hingePrevUseLimits = hinge1.useLimits;
+        hingePrevUseMotor = hinge1.useMotor;
+        hingePrevLimits = hinge1.limits;
+        hingePrevMotor = hinge1.motor;
+
+        // 以释放瞬间角度为中心，设置窄窗口的角度限制
+        float baseAngle = hinge1.jointAngle; // 当前角度（度）
+        var limits = new JointAngleLimits2D
+        {
+            min = baseAngle - Mathf.Abs(holdRodBackLimit),
+            max = baseAngle + Mathf.Abs(holdRodForwardLimit)
+        };
+
+        hinge1.useMotor = false; // 停止进一步驱动，避免与限制冲突
+        hinge1.limits = limits;  // 必须先设置 limits 再启用 useLimits
+        hinge1.useLimits = true;
+
+        hingeHoldActive = true;
+        Invoke(nameof(ReleaseHoldRodForward), Mathf.Clamp(holdForwardDuration, 0.05f, 2.0f));
+    }
+
+    void ReleaseHoldRodForward()
+    {
+        if (!hinge1 || !hingeHoldActive) return;
+        // 恢复原始设置
+        hinge1.useLimits = hingePrevUseLimits;
+        hinge1.limits = hingePrevLimits;
+        hinge1.useMotor = hingePrevUseMotor;
+        hinge1.motor = hingePrevMotor;
+        hingeHoldActive = false;
+    }
 	}
 
 	// --------------------------- 实用小块 ---------------------------
