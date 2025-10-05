@@ -309,9 +309,9 @@ public class FishingPhysics2D : MonoBehaviour
 
         float sideSign = sideSignCached;
 
-		// 用 FixedUpdate 缓存的真实竿梢速度
-		Vector2 vTip = tipVelFixed;
-        float tipFwd = (vTip.sqrMagnitude < 1e-6f) ? -999f : Vector2.Dot(vTip.normalized, castDirCached);
+        // 用 FixedUpdate 缓存的真实竿梢速度（与“水平前向”做对齐）
+        Vector2 vTip = tipVelFixed;
+        float tipFwd = (vTip.sqrMagnitude < 1e-6f) ? -999f : Vector2.Dot(vTip.normalized, castDirHorizCached);
 		bool apex = releaseAtForwardApex && tipFwdPrev > -998f && tipFwdPrev > tipFwd; // 前向速度开始回落
 		tipFwdPrev = tipFwd;
 
