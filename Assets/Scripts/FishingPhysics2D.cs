@@ -28,6 +28,10 @@ public class FishingPhysics2D : MonoBehaviour
     [Tooltip("调试绘制比例（像素/单位）")] [Range(20f, 200f)] public float graphScale = 80f;
     [Tooltip("开发快捷键：F1 HUD, F2 Graph, F3 reelAnytime, F4 holdRodForward")] public bool devHotkeys = true;
 
+    [Header("Configuration（打包参数）")]
+    [Tooltip("Awake 时是否应用下方 config 的参数覆盖")] public bool applyConfigOnAwake = true;
+    public FishingConfig config = new FishingConfig();
+
 	// ---------- Inspector（名称保持原样，兼容现有场景） ----------
 	[Header("UI & Layers")]
 	public Slider chargeSlider;
@@ -136,13 +140,15 @@ public class FishingPhysics2D : MonoBehaviour
     GUIStyle hudStyle;
 
 	// ------------------------- 生命周期 -------------------------
-	void Awake()
+    void Awake()
 	{
 		lr = GetComponent<LineRenderer>();
 		lr.useWorldSpace = true;
 		if (!lr.material) lr.material = new Material(Shader.Find("Sprites/Default"));
-		lr.startColor = lr.endColor = lineColor;
-		lr.sortingOrder = sortingOrder;
+        // 先应用配置，再设置渲染器属性，避免被覆盖
+        if (applyConfigOnAwake && config != null) ApplyConfig();
+        lr.startColor = lr.endColor = lineColor;
+        lr.sortingOrder = sortingOrder;
 		ConfigureLine();
 
 		if (rope)
@@ -681,7 +687,9 @@ public class FishingPhysics2D : MonoBehaviour
         }
         if (hudStyle == null)
         {
-            hudStyle = new GUIStyle(GUI.skin.label) { fontSize = 12, normal = { textColor = Color.white } };
+            hudStyle = new GUIStyle();
+            hudStyle.fontSize = 12;
+            hudStyle.normal.textColor = Color.white;
         }
     }
 
@@ -709,7 +717,7 @@ public class FishingPhysics2D : MonoBehaviour
         GUI.Label(new Rect(pad * 2, y + pad, size.x, size.y), txt, hudStyle);
         y += size.y + 3 * pad;
 
-        if (showGraphs && speedHistory != null)
+        if (showGraphs && Event.current.type == EventType.Repaint && speedHistory != null)
         {
             DrawGraph(new Rect(pad, y, 260, 80), speedHistory, Color.cyan, 0f, 10f);
             y += 90;
@@ -773,5 +781,69 @@ public class FishingPhysics2D : MonoBehaviour
         public UnityEvent onReelStart;
         public UnityEvent onReelFinish;
         public UnityEvent onReset;
+    }
+
+    // --------------------------- 配置容器 ---------------------------
+    [System.Serializable]
+    public class FishingConfig
+    {
+        // Cast
+        public float minCast = 1.6f;
+        public float maxCast = 7.5f;
+        public float chargeSpeed = 1.6f;
+        public float flightTime = 0.35f;
+        public float landTimeout = 0.45f;
+        // Drag
+        public float airDrag = 0.4f;
+        public float waterDrag = 4.5f;
+        // Whip
+        public float whipMotorSpeed = 1450f;
+        public float whipPulse = 0.14f;
+        public bool releaseAtForwardApex = true;
+        // Flight
+        public float flightGravity = 0.18f;
+        public float slackRatio = 0.06f;
+        public int tautFramesToLand = 2;
+        public float offscreenMargin = 0.05f;
+        public bool landOnlyOnWater = true;
+        // Launch feel
+        public float tipBoost = 1.6f;
+        public float extraBoost = 1.1f;
+        public float powerCurve = 1.20f;
+        // Reel
+        public float reelRate = 6.5f;
+        public float reelForce = 14f;
+        public bool reelAnytime = true;
+        // Line
+        public int lineSegments = 20;
+        public int pixelsPerUnit = 128;
+        public int sortingOrder = 10;
+        public Color lineColor = new Color(1f, 0.1f, 0.6f, 1f);
+        // Rod hold
+        public bool holdRodForward = true;
+        public float holdForwardDuration = 0.6f;
+        public float holdRodBackLimit = 40f;
+        public float holdRodForwardLimit = 25f;
+    }
+
+    public void ApplyConfig()
+    {
+        if (config == null) return;
+        // Cast
+        minCast = config.minCast; maxCast = config.maxCast; chargeSpeed = config.chargeSpeed; flightTime = config.flightTime; landTimeout = config.landTimeout;
+        // Drag
+        airDrag = config.airDrag; waterDrag = config.waterDrag;
+        // Whip
+        whipMotorSpeed = config.whipMotorSpeed; whipPulse = config.whipPulse; releaseAtForwardApex = config.releaseAtForwardApex;
+        // Flight
+        flightGravity = config.flightGravity; slackRatio = config.slackRatio; tautFramesToLand = config.tautFramesToLand; offscreenMargin = config.offscreenMargin; landOnlyOnWater = config.landOnlyOnWater;
+        // Launch feel
+        tipBoost = config.tipBoost; extraBoost = config.extraBoost; powerCurve = config.powerCurve;
+        // Reel
+        reelRate = config.reelRate; reelForce = config.reelForce; reelAnytime = config.reelAnytime;
+        // Line
+        lineSegments = config.lineSegments; pixelsPerUnit = config.pixelsPerUnit; sortingOrder = config.sortingOrder; lineColor = config.lineColor;
+        // Rod hold
+        holdRodForward = config.holdRodForward; holdForwardDuration = config.holdForwardDuration; holdRodBackLimit = config.holdRodBackLimit; holdRodForwardLimit = config.holdRodForwardLimit;
     }
 }
