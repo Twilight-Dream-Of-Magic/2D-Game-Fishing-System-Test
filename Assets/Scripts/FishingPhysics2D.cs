@@ -301,11 +301,15 @@ public class FishingPhysics2D : MonoBehaviour
 		ApplyRootBackAngle(currentBackAngleDeg);
 	}
 
+	// BeginWhip：计算 plannedLen —— 只按蓄力做线性映射（严格 0..1）
 	void BeginWhip()
 	{
 		ChangePhase(Phase.Whip);
 		whipT = 0f; tipFwdPrev = -999f;
+
+		// 线性：最小~最大之间的 charge01 百分比
 		plannedLen = Mathf.Lerp(ropeMinLen, ropeMaxLen, Mathf.Clamp01(charge01));
+
 		if (chargeSlider) StartUiFadeOut();
 		PulseHingeTowardMouse();
 		if (events?.onWhipBegin != null) events.onWhipBegin.Invoke();
@@ -397,6 +401,10 @@ public class FishingPhysics2D : MonoBehaviour
 		bool tight = tipTo >= rope.distance - 0.01f;
 		tautFrames = tight ? (tautFrames + 1) : 0;
 
+		if (IsSpooling()) return;                                   // 还在“放线动画”
+		if (castTimer < ropeRequiredFlightTime) return;             // 飞行至少跑这么久
+		if (tipTo < ropeMinLen - 0.01f) return;                     // 连最短线长都没拉开
+
 		// 非仅水面：可用拉紧若干帧的早落水
 		bool spooling = ropeSpoolOut && rope.maxDistanceOnly && rope.distance < ropeTargetLen - 0.01f;
 		if (!landOnlyOnWater && !spooling && tautFrames >= Mathf.Max(1, tautFramesToLand) && castTimer >= ropeRequiredFlightTime)
@@ -426,7 +434,14 @@ public class FishingPhysics2D : MonoBehaviour
 	void LockRopeAtCurrentAndWaterDamping()
 	{
 		float cur = Vector2.Distance(rodTip.position, bobber.position);
-		if (rope) { rope.enabled = true; rope.maxDistanceOnly = false; rope.distance = cur; CancelInvoke(nameof(ReapplyRopeMaxLimit)); }
+		float clamped = Mathf.Clamp(cur, ropeMinLen, ropeMaxLen);   // 落水后的“物理长度”落在最小/最大之间
+		if (rope)
+		{
+			rope.enabled = true;
+			rope.maxDistanceOnly = false; // 精确长度模式
+			rope.distance = clamped;
+			CancelInvoke(nameof(ReapplyRopeMaxLimit));
+		}
 		bobber.linearVelocity = Vector2.zero;
 		bobber.angularVelocity = 0f;
 		bobber.linearDamping = waterDrag;
@@ -481,8 +496,10 @@ public class FishingPhysics2D : MonoBehaviour
 	// 统一设置：释放时线状态（使用精简参数）
 	void SetRopeForRelease()
 	{
-		if (!rope) return;
+		if (!rope) 
+			return;
 		rope.enabled = true;
+		// 飞行期：用“最大长度模式”，且上限=计划长度（直接到位，不要从最短开始）
 		rope.maxDistanceOnly = true;
 
 		// === “逐渐放线”的动画
@@ -491,20 +508,23 @@ public class FishingPhysics2D : MonoBehaviour
 		ropeSpoolElapsed = 0f;
 	}
 
-	// 统一判断：是否应当强制落水（锁长）
+	// 仅水面落水的判断：删除“到时就落”，改为“入水后稳定 + (绷紧/变慢/回向)”才落
+
+	bool IsSpooling() => ropeSpoolOut && rope && rope.maxDistanceOnly && rope.distance < ropeTargetLen - 0.01f;
+
 	bool ShouldForceLand(bool inWaterNow, bool tight, bool inward, bool slowInWater)
 	{
+		bool timeout = castTimer >= ropeFlightTimeout;
 		if (landOnlyOnWater)
 		{
-			if (inWaterNow && (castTimer >= ropeRequiredFlightTime || (sawWater && (castTimer - waterHitT) >= Mathf.Max(0f, waterSettleDelay) && (tight || inward || slowInWater))))
-				return true;
-			return false;
+			if (!inWaterNow) return false;
+			bool settleOk = sawWater && (castTimer - waterHitT) >= Mathf.Max(0f, waterSettleDelay);
+			// 只在“绷紧或超时”并且水面稳定后才落水
+			return settleOk && (tight || timeout);
 		}
 		else
 		{
-			if (tautFrames >= Mathf.Max(1, tautFramesToLand) && castTimer >= ropeRequiredFlightTime) return true;
-			if (castTimer >= ropeFlightTimeout && (inWaterNow || (tight && inward))) return true;
-			return false;
+			return (tight && castTimer >= ropeRequiredFlightTime) || timeout;
 		}
 	}
 
@@ -670,7 +690,6 @@ public class FishingPhysics2D : MonoBehaviour
 		Vector2 mouse = Camera.main ? (Vector2)Camera.main.ScreenToWorldPoint(Input.mousePosition) : origin + Vector2.right;
 		Vector2 delta = (mouse - origin);
 		sideSign = (delta.x >= 0f) ? 1f : -1f;
-		sideSign = Mathf.Sign(Mathf.Abs(delta.x) < 1e-4f ? 1f : delta.x); // 右:+1，左:-1
 	}
 	// 围绕 RodRoot 旋转（不再直接旋转 seg1）
 	void ApplyRootBackAngle(float backDeg)
