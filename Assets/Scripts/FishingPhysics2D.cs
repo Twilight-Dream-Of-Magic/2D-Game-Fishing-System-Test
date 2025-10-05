@@ -204,8 +204,8 @@ public class FishingPhysics2D : MonoBehaviour
 	// --------------------------- 主循环 ---------------------------
     void Update()
     {
-        // 右键紧急复位
-        if (Input.GetMouseButtonDown(1)) { ResetAll(snapRodAlsoFromEmergencyReset); return; }
+        // 右键紧急复位（先彻底取消所有延迟/协程）
+        if (Input.GetMouseButtonDown(1)) { CancelInvoke(); StopAllCoroutines(); ResetAll(snapRodAlsoFromEmergencyReset); return; }
 
         // 把阶段逻辑分发给 fsm（内部仍调用当前类的方法）
         fsm.Tick(this, Time.deltaTime);
@@ -452,34 +452,59 @@ void RestoreRodPoseOnly()
 
     void ResetAll(bool snapRod)
 	{
+        // —— 强制进入 Idle，并把 FSM 重新初始化，切断上一阶段的 Tick —— //
         ChangePhase(Phase.Idle);
-		charge01 = 0f; castTimer = 0f; plannedLen = 0f;
-		uiFading = false; uiFadeT = 0f; whipT = 0f; tipFwdPrev = -999f; tautFrames = 0;
-		tipVelFixed = Vector2.zero;
+        fsm.Init(Phase.Idle);
 
-		if (rope) { rope.enabled = false; rope.distance = 0f; rope.maxDistanceOnly = true; }
+        // —— 取消任何延迟/Invoke/协程（StopHingeMotor、ReleaseHoldRodForward 等）—— //
+        CancelInvoke();
+        StopAllCoroutines();
+        hingeHoldActive = false; // 防止误判
 
-		if (bobber)
-		{
-			bobber.bodyType = RigidbodyType2D.Kinematic;
-			bobber.linearVelocity = Vector2.zero;
-			bobber.angularVelocity = 0f;
-			bobber.linearDamping = airDrag;
-			bobber.gravityScale = 0f;
-			AttachToTipKeepWorld();
-			bobber.transform.localPosition = Vector3.zero;
-		}
+        // —— 关闭所有关节的 motor/limits —— //
+        ResetHinge(hinge1); ResetHinge(hinge2); ResetHinge(hinge3);
 
-		if (chargeSlider) { chargeSlider.value = 0f; chargeSlider.gameObject.SetActive(false); }
+        // —— 基本标量清零 —— //
+        charge01 = 0f; castTimer = 0f; plannedLen = 0f;
+        uiFading = false; uiFadeT = 0f; whipT = 0f; tipFwdPrev = -999f; tautFrames = 0;
+        tipVelFixed = Vector2.zero;
 
+        // —— 线关节：彻底关闭并清零 —— //
+        if (rope) { rope.enabled = false; rope.maxDistanceOnly = true; rope.distance = 0f; }
+
+        // —— 清零所有刚体的线/角速度（不仅仅是 bobber）—— //
+        ZeroRB(seg1); ZeroRB(seg2); ZeroRB(seg3); ZeroRB(rodTip); ZeroRB(bobber);
+
+        // —— 复位外观（先把段设为 Kinematic，套用快照，再还原）—— //
         if (snapRod) RestoreHomePoseInstant();
+        else {
+            // 即便不 snapRod，也要把 bobber 正确回挂
+            AttachToTipKeepWorld();
+            bobber.transform.localPosition = Vector3.zero;
+        }
 
-        // 还原 Hinge 任何临时保持
-        CancelInvoke(nameof(ReleaseHoldRodForward));
-        ReleaseHoldRodForward();
+        // —— Bobber 回到“整体状态” —— //
+        if (bobber)
+        {
+            bobber.bodyType = RigidbodyType2D.Kinematic;
+            bobber.linearVelocity = Vector2.zero;
+            bobber.angularVelocity = 0f;
+            bobber.linearDamping = airDrag;
+            bobber.gravityScale = 0f;
+            AttachToTipKeepWorld();
+            bobber.transform.localPosition = Vector3.zero;
+        }
 
-        lr.enabled = false;
-		UpdateLineRenderer();
+        // —— UI & 线渲染器 —— //
+        if (chargeSlider) { chargeSlider.value = 0f; chargeSlider.gameObject.SetActive(false); }
+        if (lr)
+        {
+            lr.enabled = false;
+            lr.positionCount = Mathf.Max(2, lineSegments) + 1;
+            Vector3 p = rodTip ? (Vector3)rodTip.position : transform.position;
+            for (int i = 0; i < lr.positionCount; i++) lr.SetPosition(i, p);
+        }
+
         if (events?.onReset != null) events.onReset.Invoke();
         Debug.Log("[Fishing] ResetToIdle", this);
 	}
@@ -549,6 +574,8 @@ void RestoreRodPoseOnly()
         hinge1.useMotor = hingePrevUseMotor;
         hinge1.motor = hingePrevMotor;
         hingeHoldActive = false;
+        // 保险：确保完全关闭
+        ResetHinge(hinge1);
     }
 
 
@@ -623,7 +650,7 @@ void RestoreRodPoseOnly()
 		if (dist > maxCast * 3f || float.IsNaN(dist))
 		{ // 极限保护
 			Debug.LogWarning($"[Fishing] Watchdog: dist={dist:F2} too large, RESET.", this);
-			ResetAll(true);
+            CancelInvoke(); StopAllCoroutines(); ResetAll(true);
 		}
 	}
 
@@ -773,6 +800,25 @@ void RestoreRodPoseOnly()
         public UnityEvent onReelStart;
         public UnityEvent onReelFinish;
         public UnityEvent onReset;
+    }
+
+    // --------------------------- 工具：刚体/关节清理 ---------------------------
+    void ZeroRB(Rigidbody2D rb)
+    {
+        if (!rb) return;
+        rb.linearVelocity = Vector2.zero;
+        rb.angularVelocity = 0f;
+    }
+
+    void ResetHinge(Joint2D j)
+    {
+        if (!j) return;
+        if (j is HingeJoint2D h)
+        {
+            h.useMotor = false;
+            var m = h.motor; m.motorSpeed = 0f; m.maxMotorTorque = 0f; h.motor = m;
+            h.useLimits = false;
+        }
     }
 
     // --------------------------- 有限状态机（同文件内隔离） ---------------------------
