@@ -646,7 +646,8 @@ void RestoreRodPoseOnly()
         Vector2 mouse = Camera.main ? (Vector2)Camera.main.ScreenToWorldPoint(Input.mousePosition) : origin + Vector2.right;
         Vector2 delta = (mouse - origin);
         castDir = delta.sqrMagnitude > 1e-6f ? delta.normalized : Vector2.right;
-        sideSign = Mathf.Sign(Mathf.Abs(delta.x) < 1e-4f ? 1f : delta.x); // 右:+1，左:-1
+        // 明确镜像：仅看相对水平（严格二值），避免接近0的抖动
+        sideSign = (delta.x >= 0f) ? 1f : -1f; // 右:+1，左:-1
     }
     // 围绕 RodRoot 旋转（不再直接旋转 seg1）
     void ApplySeg1BackAngle(float backDeg)
