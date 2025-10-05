@@ -341,8 +341,11 @@ public class FishingPhysics2D : MonoBehaviour
 		bobber.linearDamping = airDrag;
 		bobber.gravityScale = flightGravity; // 抛物线感觉
 
-        // 初速度：竿梢切向 + 解析前向（使用传入的 castDir，已在 Whip 阶段决定为“与鼠标相反的水平向”）
-        Vector2 vInit = vTip * Mathf.Max(0f, tipBoost) + castDir.normalized * v0 * Mathf.Max(0f, extraBoost);
+        // 初速度：将竿梢速度投影到释放方向，确保方向与镜像规则一致；再叠加解析前向
+        Vector2 dir = castDir.sqrMagnitude > 1e-6f ? castDir.normalized : new Vector2(-sideSign, 0f);
+        float vTipAlong = Vector2.Dot(vTip, dir);
+        Vector2 vTipForward = Mathf.Abs(vTipAlong) * dir;
+        Vector2 vInit = vTipForward * Mathf.Max(0f, tipBoost) + dir * v0 * Mathf.Max(0f, extraBoost);
 		bobber.linearVelocity = vInit;
 
         // 线控：释放时设置
