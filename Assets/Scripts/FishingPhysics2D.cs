@@ -272,7 +272,7 @@ public class FishingPhysics2D : MonoBehaviour
 
     void TickCharging(float dt)
 	{
-        charge01 = Mathf.Min(1f, charge01 + Mathf.Max(0f, chargeSpeed) * dt);
+        charge01 = Mathf.Min(1f, charge01 + 1.6f * dt);
         if (chargeSlider) chargeSlider.value = charge01;
 
         // 禁用根节马达，Charging 仅用确定性后仰角呈现
@@ -427,10 +427,10 @@ public class FishingPhysics2D : MonoBehaviour
         }
 
         // 原有逻辑：超时且已绷紧
-        if (castTimer < landTimeout) return;
+        if (castTimer < ropeRequiredFlightTime) return;
         float tipTo = Vector2.Distance(rodTip.position, bobber.position);
         if (tipTo < rope.distance - 0.02f) return; // 未绷紧
-        ForceLand();
+        LockRopeAtCurrentAndWaterDamping();
         BeginReel();
         Debug.Log("[Fishing] Begin reel from Flight (tight & timeout)", this);
 	}
@@ -755,7 +755,7 @@ void RestoreRodPoseOnly()
 
 		Vector3 A = rodTip.position, B = bobber.position;
 		float L = Vector2.Distance(A, B);
-		float Lc = Mathf.Min(L, maxCast * 1.5f);
+        float Lc = Mathf.Min(L, ropeMaxLen * 1.5f);
 		bool sagging = (phase == Phase.Landed || phase == Phase.Reeling);
 		float sag = sagging ? 0.10f : 0f;
 
@@ -775,7 +775,7 @@ void RestoreRodPoseOnly()
 	{
 		if (phase == Phase.Idle || !rodTip || !bobber) return;
 		float dist = Vector2.Distance(rodTip.position, bobber.position);
-		if (dist > maxCast * 3f || float.IsNaN(dist))
+        if (dist > ropeMaxLen * 3f || float.IsNaN(dist))
 		{ // 极限保护
 			Debug.LogWarning($"[Fishing] Watchdog: dist={dist:F2} too large, RESET.", this);
             CancelInvoke(); StopAllCoroutines(); ResetAll(true);
@@ -972,7 +972,6 @@ void RestoreRodPoseOnly()
     }
 
     // --------------------------- 有限状态机（同文件内隔离） ---------------------------
-    [System.Serializable]
     public class PhaseMachine
     {
         public Phase current;
@@ -1011,11 +1010,7 @@ void RestoreRodPoseOnly()
     public class FishingConfig
     {
         // Cast
-        public float minCast = 1.6f;
-        public float maxCast = 7.5f;
-        public float chargeSpeed = 1.6f;
-        public float flightTime = 0.35f;
-        public float landTimeout = 0.45f;
+        // removed legacy cast params
         // Drag
         public float airDrag = 0.4f;
         public float waterDrag = 4.5f;
@@ -1045,15 +1040,14 @@ void RestoreRodPoseOnly()
         // Rod hold
         public bool holdRodForward = true;
         public float holdForwardDuration = 0.6f;
-        public float holdRodBackLimit = 40f;
-        public float holdRodForwardLimit = 25f;
+        // removed legacy per-hold limits (use Rod Limits)
     }
 
     public void ApplyConfig()
     {
         if (config == null) return;
         // Cast
-        minCast = config.minCast; maxCast = config.maxCast; chargeSpeed = config.chargeSpeed; flightTime = config.flightTime; landTimeout = config.landTimeout;
+        // removed legacy cast mapping
         // Drag
         airDrag = config.airDrag; waterDrag = config.waterDrag;
         // Whip
@@ -1067,6 +1061,6 @@ void RestoreRodPoseOnly()
         // Line
         lineSegments = config.lineSegments; pixelsPerUnit = config.pixelsPerUnit; sortingOrder = config.sortingOrder; lineColor = config.lineColor;
         // Rod hold
-        holdRodForward = config.holdRodForward; holdForwardDuration = config.holdForwardDuration; holdRodBackLimit = config.holdRodBackLimit; holdRodForwardLimit = config.holdRodForwardLimit;
+        holdRodForward = config.holdRodForward; holdForwardDuration = config.holdForwardDuration;
     }
 }
