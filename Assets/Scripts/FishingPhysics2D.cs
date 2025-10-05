@@ -102,7 +102,8 @@ public class FishingPhysics2D : MonoBehaviour
 
 	// ------------------------- 内部状态 -------------------------
 	enum Phase { Idle, Charging, Whip, Flight, Landed, Reeling }
-	Phase phase = Phase.Idle;
+    Phase phase = Phase.Idle;
+    PhaseMachine fsm = new PhaseMachine();
 
 	LineRenderer lr;
 	float charge01, castTimer, plannedLen;
@@ -151,6 +152,7 @@ public class FishingPhysics2D : MonoBehaviour
         lr.startColor = lr.endColor = lineColor;
         lr.sortingOrder = sortingOrder;
 		ConfigureLine();
+        fsm.Init(Phase.Idle);
 
 		if (rope)
 		{
@@ -670,6 +672,7 @@ void RestoreRodPoseOnly()
         if (logPhaseChanges)
             Debug.Log($"[Fishing] Phase: {phase} -> {next}", this);
         phase = next;
+        fsm.Set(next);
     }
 
     void LateUpdate()
@@ -796,6 +799,15 @@ void RestoreRodPoseOnly()
         public UnityEvent onReelStart;
         public UnityEvent onReelFinish;
         public UnityEvent onReset;
+    }
+
+    // --------------------------- 有限状态机（同文件内隔离） ---------------------------
+    [System.Serializable]
+    public class PhaseMachine
+    {
+        public Phase current;
+        public void Init(Phase initial) { current = initial; }
+        public void Set(Phase next) { current = next; }
     }
 
     // --------------------------- 配置容器 ---------------------------
