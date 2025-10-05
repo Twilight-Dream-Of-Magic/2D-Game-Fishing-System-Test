@@ -11,11 +11,23 @@
 
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.Events;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(LineRenderer))]
 public class FishingPhysics2D : MonoBehaviour
 {
+    [Header("Events（外部可挂回调）")]
+    public FishingEvents events = new FishingEvents();
+
+    [Header("Debug & HUD（开发期可视化）")]
+    [Tooltip("是否绘制屏幕左上角状态信息")] public bool showDebugOverlay = false;
+    [Tooltip("是否绘制速度/距离曲线")] public bool showGraphs = false;
+    [Tooltip("是否打印阶段切换日志")] public bool logPhaseChanges = true;
+    [Tooltip("曲线采样容量（帧）")] [Range(60, 1024)] public int historyCapacity = 300;
+    [Tooltip("调试绘制比例（像素/单位）")] [Range(20f, 200f)] public float graphScale = 80f;
+    [Tooltip("开发快捷键：F1 HUD, F2 Graph, F3 reelAnytime, F4 holdRodForward")] public bool devHotkeys = true;
+
 	// ---------- Inspector（名称保持原样，兼容现有场景） ----------
 	[Header("UI & Layers")]
 	public Slider chargeSlider;
@@ -110,6 +122,17 @@ public class FishingPhysics2D : MonoBehaviour
     bool hingePrevUseLimits, hingePrevUseMotor;
     JointAngleLimits2D hingePrevLimits;
     JointMotor2D hingePrevMotor;
+
+    // Debug 运行统计与历史
+    int castCount;          // 总抛次数
+    float maxCastDistance;  // 历史最远落水长度
+    float lastCastLen;      // 上一次落水长度
+    float lastReleaseSpeed; // 上一次释放初速
+
+    float[] speedHistory;   // 每帧 tip/bobber 速度采样
+    float[] distHistory;    // 每帧 tip-bobber 距离采样
+    int histIndex;
+    GUIStyle hudStyle;
 
 	// ------------------------- 生命周期 -------------------------
 	void Awake()
@@ -212,9 +235,9 @@ public class FishingPhysics2D : MonoBehaviour
 	}
 
 	// --------------------------- 状态实现 ---------------------------
-	void BeginCharging()
+    void BeginCharging()
 	{
-		phase = Phase.Charging;
+        ChangePhase(Phase.Charging);
 		charge01 = 0f; castTimer = 0f;
 
 		if (chargeSlider) { chargeSlider.value = 0; chargeSlider.gameObject.SetActive(true); }
@@ -223,7 +246,8 @@ public class FishingPhysics2D : MonoBehaviour
 		bobber.transform.localPosition = Vector3.zero;
 		if (rope) rope.enabled = false;
 
-		Debug.Log("[Fishing] Charging start", this);
+        if (events?.onChargeStart != null) events.onChargeStart.Invoke();
+        Debug.Log("[Fishing] Charging start", this);
 	}
 
 	void TickCharging(float dt)
@@ -232,14 +256,15 @@ public class FishingPhysics2D : MonoBehaviour
 		if (chargeSlider) chargeSlider.value = charge01;
 	}
 
-	void BeginWhip()
+    void BeginWhip()
 	{
-		phase = Phase.Whip;
+        ChangePhase(Phase.Whip);
 		whipT = 0f; tipFwdPrev = -999f;
 		plannedLen = minCast + (maxCast - minCast) * Mathf.Pow(Mathf.Clamp01(charge01), Mathf.Max(0.05f, powerCurve));
 		if (chargeSlider) StartUiFadeOut();
 		PulseHingeTowardMouse();
-		Debug.Log($"[Fishing] WHIP charge={charge01:F2} lenPlan={plannedLen:F2}", this);
+        if (events?.onWhipBegin != null) events.onWhipBegin.Invoke();
+        Debug.Log($"[Fishing] WHIP charge={charge01:F2} lenPlan={plannedLen:F2}", this);
 	}
 
 	void TickWhip(float dt)
@@ -260,7 +285,7 @@ public class FishingPhysics2D : MonoBehaviour
 		if (apex || whipT >= whipPulse) ReleaseNow(castDir, vTip);
 	}
 
-	void ReleaseNow(Vector2 castDir, Vector2 vTip)
+    void ReleaseNow(Vector2 castDir, Vector2 vTip)
 	{
 		// 解析推算的额外速度（与规划线长 / 阻尼 / 时间窗有关）
 		float v0 = EstimateInitialSpeed(plannedLen, bobber ? bobber.linearDamping : airDrag, flightTime);
@@ -281,10 +306,12 @@ public class FishingPhysics2D : MonoBehaviour
 			rope.distance = Mathf.Min(plannedLen * (1f + Mathf.Abs(slackRatio)), maxCast);
 		}
 
-		phase = Phase.Flight;
+        ChangePhase(Phase.Flight);
 		castTimer = 0f; tautFrames = 0;
 
-		Debug.Log($"[Fishing] RELEASE vTip={vTip.magnitude:F2} v0={v0:F2}", this);
+        lastReleaseSpeed = vInit.magnitude;
+        if (events?.onRelease != null) events.onRelease.Invoke();
+        Debug.Log($"[Fishing] RELEASE vTip={vTip.magnitude:F2} v0={v0:F2}", this);
 
         // 抛出后短暂保持前倾（可选）
         if (holdRodForward) HoldRodForwardTemporarily();
@@ -323,7 +350,7 @@ public class FishingPhysics2D : MonoBehaviour
 		return v.x < -margin || v.x > 1f + margin || v.y < -margin || v.y > 1f + margin;
 	}
 
-	void ForceLand()
+    void ForceLand()
 	{
 		float cur = Vector2.Distance(rodTip.position, bobber.position);
 		if (rope) { rope.enabled = true; rope.maxDistanceOnly = true; rope.distance = cur; }
@@ -331,8 +358,12 @@ public class FishingPhysics2D : MonoBehaviour
 		bobber.angularVelocity = 0f;
 		bobber.linearDamping = waterDrag;
 		bobber.gravityScale = 0f;
-		phase = Phase.Landed;
-		Debug.Log($"[Fishing] LANDED lockLen={cur:F2}", this);
+        ChangePhase(Phase.Landed);
+        castCount++;
+        lastCastLen = cur;
+        maxCastDistance = Mathf.Max(maxCastDistance, cur);
+        if (events?.onLand != null) events.onLand.Invoke();
+        Debug.Log($"[Fishing] LANDED lockLen={cur:F2}", this);
 	}
 
 	void TryBeginReelFromFlight()
@@ -357,11 +388,12 @@ public class FishingPhysics2D : MonoBehaviour
         Debug.Log("[Fishing] Begin reel from Flight (tight & timeout)", this);
 	}
 
-	void BeginReel()
+    void BeginReel()
 	{
-		phase = Phase.Reeling;
+        ChangePhase(Phase.Reeling);
 		if (rope) rope.maxDistanceOnly = false; // 绝对长度模式：distance 变短会“拖回来”
-		Debug.Log("[Fishing] Reel start", this);
+        if (events?.onReelStart != null) events.onReelStart.Invoke();
+        Debug.Log("[Fishing] Reel start", this);
 	}
 
 	void TickReeling(float dt)
@@ -380,10 +412,11 @@ public class FishingPhysics2D : MonoBehaviour
 				bobber.transform.localPosition = Vector3.zero;
 				bobber.gravityScale = 0f;
 
-				if (snapRodOnReelFinish) RestoreHomePoseInstant();
+                if (snapRodOnReelFinish) RestoreHomePoseInstant();
 
-				phase = Phase.Idle;
-				Debug.Log("[Fishing] Reel finish", this);
+                ChangePhase(Phase.Idle);
+                if (events?.onReelFinish != null) events.onReelFinish.Invoke();
+                Debug.Log("[Fishing] Reel finish", this);
 			}
 		}
 	}
@@ -414,9 +447,9 @@ public class FishingPhysics2D : MonoBehaviour
 		bobber.transform.localPosition = Vector3.zero;
 	}
 
-	void ResetAll(bool snapRod)
+    void ResetAll(bool snapRod)
 	{
-		phase = Phase.Idle;
+        ChangePhase(Phase.Idle);
 		charge01 = 0f; castTimer = 0f; plannedLen = 0f;
 		uiFading = false; uiFadeT = 0f; whipT = 0f; tipFwdPrev = -999f; tautFrames = 0;
 		tipVelFixed = Vector2.zero;
@@ -442,10 +475,10 @@ public class FishingPhysics2D : MonoBehaviour
         CancelInvoke(nameof(ReleaseHoldRodForward));
         ReleaseHoldRodForward();
 
-		lr.enabled = false;
+        lr.enabled = false;
 		UpdateLineRenderer();
-
-		Debug.Log("[Fishing] ResetToIdle", this);
+        if (events?.onReset != null) events.onReset.Invoke();
+        Debug.Log("[Fishing] ResetToIdle", this);
 	}
 
 	// --------------------------- 附着/解绑 ---------------------------
@@ -602,4 +635,137 @@ public class FishingPhysics2D : MonoBehaviour
 		chargeSlider.value = k * chargeSlider.value;
 		if (uiFadeT >= dur) { chargeSlider.value = 0; chargeSlider.gameObject.SetActive(false); uiFading = false; }
 	}
+
+    // --------------------------- Phase/Debug/HUD ---------------------------
+    void ChangePhase(Phase next)
+    {
+        if (phase == next) return;
+        if (logPhaseChanges)
+            Debug.Log($"[Fishing] Phase: {phase} -> {next}", this);
+        phase = next;
+    }
+
+    void LateUpdate()
+    {
+        // 开发热键
+        if (devHotkeys)
+        {
+            if (Input.GetKeyDown(KeyCode.F1)) showDebugOverlay = !showDebugOverlay;
+            if (Input.GetKeyDown(KeyCode.F2)) showGraphs = !showGraphs;
+            if (Input.GetKeyDown(KeyCode.F3)) reelAnytime = !reelAnytime;
+            if (Input.GetKeyDown(KeyCode.F4)) holdRodForward = !holdRodForward;
+        }
+
+        // 历史曲线
+        EnsureHistoryBuffers();
+        float tipSpeed = tipVelFixed.magnitude;
+        float bobSpeed = (bobber ? bobber.linearVelocity.magnitude : 0f);
+        float dist = (rodTip && bobber) ? Vector2.Distance(rodTip.position, bobber.position) : 0f;
+        AppendHistory(Mathf.Max(tipSpeed, bobSpeed), dist);
+    }
+
+    void EnsureHistoryBuffers()
+    {
+        int cap = Mathf.Clamp(historyCapacity, 60, 2048);
+        if (speedHistory == null || speedHistory.Length != cap)
+        {
+            speedHistory = new float[cap];
+            distHistory = new float[cap];
+            histIndex = 0;
+        }
+        if (hudStyle == null)
+        {
+            hudStyle = new GUIStyle(GUI.skin.label) { fontSize = 12, normal = { textColor = Color.white } };
+        }
+    }
+
+    void AppendHistory(float speed, float distance)
+    {
+        if (speedHistory == null) return;
+        int cap = speedHistory.Length;
+        speedHistory[histIndex] = speed;
+        distHistory[histIndex] = distance;
+        histIndex = (histIndex + 1) % cap;
+    }
+
+    void OnGUI()
+    {
+        if (!showDebugOverlay) return;
+        const float pad = 8f;
+        float y = pad;
+        float lineH = 18f;
+        string p = phase.ToString();
+        string txt = $"Phase: {p}\nCasts: {castCount}  MaxLen: {maxCastDistance:F2}\nRelease v: {lastReleaseSpeed:F2}\nTip v: {tipVelFixed.magnitude:F2}\nDist: {(rodTip && bobber ? Vector2.Distance(rodTip.position, bobber.position) : 0f):F2}\nReelAny: {reelAnytime} HoldFwd: {holdRodForward}";
+        Vector2 size = hudStyle.CalcSize(new GUIContent(txt));
+        GUI.color = new Color(0, 0, 0, 0.6f);
+        GUI.Box(new Rect(pad, y, size.x + 2 * pad, size.y + 2 * pad), GUIContent.none);
+        GUI.color = Color.white;
+        GUI.Label(new Rect(pad * 2, y + pad, size.x, size.y), txt, hudStyle);
+        y += size.y + 3 * pad;
+
+        if (showGraphs && speedHistory != null)
+        {
+            DrawGraph(new Rect(pad, y, 260, 80), speedHistory, Color.cyan, 0f, 10f);
+            y += 90;
+            DrawGraph(new Rect(pad, y, 260, 80), distHistory, Color.yellow, 0f, Mathf.Max(1f, maxCast));
+            y += 90;
+        }
+    }
+
+    void DrawGraph(Rect r, float[] data, Color color, float min, float max)
+    {
+        GUI.color = new Color(0, 0, 0, 0.5f);
+        GUI.Box(r, GUIContent.none);
+        GUI.color = color;
+        if (data == null || data.Length == 0) return;
+        int cap = data.Length;
+        Vector2 prev = Vector2.zero; bool hasPrev = false;
+        for (int i = 0; i < cap; i++)
+        {
+            int idx = (histIndex + i) % cap;
+            float t = i / (float)(cap - 1);
+            float v = Mathf.InverseLerp(min, max, data[idx]);
+            Vector2 p = new Vector2(Mathf.Lerp(r.x + 2, r.xMax - 2, t), Mathf.Lerp(r.yMax - 2, r.y + 2, v));
+            if (hasPrev) Drawing.DrawLine(prev, p, color, 1f);
+            prev = p; hasPrev = true;
+        }
+        GUI.color = Color.white;
+    }
+
+    // 简单的线段绘制（OnGUI）
+    static class Drawing
+    {
+        static Texture2D _lineTex;
+        public static void DrawLine(Vector2 a, Vector2 b, Color color, float width)
+        {
+            if (_lineTex == null)
+            {
+                _lineTex = new Texture2D(1, 1, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Repeat };
+                _lineTex.SetPixel(0, 0, Color.white);
+                _lineTex.Apply();
+            }
+            Matrix4x4 m = GUI.matrix;
+            Color prev = GUI.color;
+            GUI.color = color;
+            Vector2 d = b - a;
+            float ang = Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg;
+            float len = d.magnitude;
+            GUIUtility.RotateAroundPivot(ang, a);
+            GUI.DrawTexture(new Rect(a.x, a.y - width * 0.5f, len, width), _lineTex);
+            GUI.matrix = m; GUI.color = prev;
+        }
+    }
+
+    // --------------------------- 事件容器 ---------------------------
+    [System.Serializable]
+    public class FishingEvents
+    {
+        public UnityEvent onChargeStart;
+        public UnityEvent onWhipBegin;
+        public UnityEvent onRelease;
+        public UnityEvent onLand;
+        public UnityEvent onReelStart;
+        public UnityEvent onReelFinish;
+        public UnityEvent onReset;
+    }
 }
