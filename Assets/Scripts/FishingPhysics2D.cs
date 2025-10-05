@@ -337,9 +337,8 @@ public class FishingPhysics2D : MonoBehaviour
 		bobber.linearDamping = airDrag;
 		bobber.gravityScale = flightGravity; // 抛物线感觉
 
-		// 初速度：竿梢切向 + 解析前向
-        // 解析前向分量仅取水平符号，避免Y干扰左右；仍允许 vTip 提供斜向分量
-        Vector2 vInit = vTip * Mathf.Max(0f, tipBoost) + new Vector2(sideSign, 0f) * v0 * Mathf.Max(0f, extraBoost);
+        // 初速度：竿梢切向 + 解析前向（使用传入的 castDir，已在 Whip 阶段决定为“与鼠标相反的水平向”）
+        Vector2 vInit = vTip * Mathf.Max(0f, tipBoost) + castDir.normalized * v0 * Mathf.Max(0f, extraBoost);
 		bobber.linearVelocity = vInit;
 
 		// 飞行：严格“最大长度上限”，略加松弛
