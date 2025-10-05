@@ -65,6 +65,9 @@ public class FishingPhysics2D : MonoBehaviour
     public float whipMotorSpeed = 1100f;
     public float whipPulse = 0.14f;
     public bool releaseAtForwardApex = true;
+    [Header("Whip Animation（根节点动画）")]
+    [Tooltip("Whip 阶段是否同时动画 RodRoot 角度")] public bool animateRodRootInWhip = true;
+    [Tooltip("Whip 阶段的目标前倾角（度）")] public float forwardLeanDeg = 18f;
 
     [Header("Flight Gravity")]
     [Tooltip("飞行期的重力系数（顶视角 0.10~0.30）")] public float flightGravity = 0.18f;
@@ -302,12 +305,23 @@ public class FishingPhysics2D : MonoBehaviour
 		Vector2 origin = rodTip ? (Vector2)rodTip.position : (Vector2)transform.position;
 		Vector2 mouse = Camera.main ? (Vector2)Camera.main.ScreenToWorldPoint(Input.mousePosition) : origin + Vector2.right;
 		Vector2 castDir = (mouse - origin).sqrMagnitude > 1e-6f ? (mouse - origin).normalized : Vector2.right;
+        float sideSign = Mathf.Sign(Mathf.Abs(castDir.x) < 1e-4f ? 1f : castDir.x); // 右:+1，左:-1
 
 		// 用 FixedUpdate 缓存的真实竿梢速度
 		Vector2 vTip = tipVelFixed;
 		float tipFwd = (vTip.sqrMagnitude < 1e-6f) ? -999f : Vector2.Dot(vTip.normalized, castDir);
 		bool apex = releaseAtForwardApex && tipFwdPrev > -998f && tipFwdPrev > tipFwd; // 前向速度开始回落
 		tipFwdPrev = tipFwd;
+
+        // 根节点前倾动画：将 backAngle 朝前倾过渡（与鼠标方向一致）
+        if (animateRodRootInWhip && RodRoot)
+        {
+            float p = Mathf.Clamp01(whipT / Mathf.Max(0.02f, whipPulse));
+            float targetDeg = Mathf.Lerp(currentBackAngleDeg, Mathf.Abs(forwardLeanDeg) * sideSign, p);
+            if (enforceRodLimits) targetDeg = Mathf.Clamp(targetDeg, rodMinAngleDeg, rodMaxAngleDeg);
+            currentBackAngleDeg = Mathf.SmoothDampAngle(currentBackAngleDeg, targetDeg, ref rotSmoothVelDeg, Mathf.Max(0.0001f, rotationSmoothTime));
+            ApplySeg1BackAngle(currentBackAngleDeg);
+        }
 
 		if (apex || whipT >= whipPulse) ReleaseNow(castDir, vTip);
 	}
