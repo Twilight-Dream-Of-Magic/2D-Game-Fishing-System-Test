@@ -47,14 +47,14 @@ public class FishingPhysics2D : MonoBehaviour
 	public DistanceJoint2D rope;          // 挂在 bobber 上，connectedBody=rodTip
 
     [Header("Cast Tuning")]
-    [Min(0.01f)] public float minCast = 1.6f;
-    [Min(0.01f)] public float maxCast = 7.5f;
+    [Min(0.01f)] public float minCast = 1.8f;
+    [Min(0.01f)] public float maxCast = 7.2f;
     [Tooltip("每秒蓄力进度 0..1")] public float chargeSpeed = 1.6f;
     [Tooltip("用于估计额外前向速度的时间窗")] public float flightTime = 0.35f;
     [Tooltip("最小飞行时间（早于此不落水判定）")] public float landTimeout = 0.45f;
 
     [Header("Drag (Unity 6 uses linearDamping)")]
-    public float airDrag = 0.4f;
+    public float airDrag = 0.38f;
     public float waterDrag = 4.5f;
 
     [Header("Reel Tuning")]
@@ -62,7 +62,7 @@ public class FishingPhysics2D : MonoBehaviour
     [Tooltip("沿绳方向额外拉力")] public float reelForce = 14f;
 
     [Header("Whip（甩竿）")]
-    public float whipMotorSpeed = 1450f;
+    public float whipMotorSpeed = 1100f;
     public float whipPulse = 0.14f;
     public bool releaseAtForwardApex = true;
 
@@ -70,8 +70,8 @@ public class FishingPhysics2D : MonoBehaviour
     [Tooltip("飞行期的重力系数（顶视角 0.10~0.30）")] public float flightGravity = 0.18f;
 
     [Header("Launch Feel（手感增强）")]
-    [Tooltip("竿梢速度增益")] public float tipBoost = 1.6f;
-    [Tooltip("解析额外速度增益")] public float extraBoost = 1.1f;
+    [Tooltip("竿梢速度增益")] public float tipBoost = 1.30f;
+    [Tooltip("解析额外速度增益")] public float extraBoost = 1.00f;
     [Tooltip("蓄力曲线 >1 变硬，<1 变软")] public float powerCurve = 1.20f;
 
     [Header("Launch Feel（竿身旋转）")]
@@ -101,14 +101,14 @@ public class FishingPhysics2D : MonoBehaviour
 
     [Header("Rod Forward Hold（抛出后前倾保持）")]
     [Tooltip("抛出后短时间把根节角度限制在前倾区间")] public bool holdRodForward = true;
-    [Tooltip("保持时长（秒）")] public float holdForwardDuration = 0.6f;
+    [Tooltip("保持时长（秒）")] public float holdForwardDuration = 0.55f;
     [Tooltip("相对释放瞬间角度，允许后仰的角度上限（度）")] [Range(0f, 90f)] public float holdRodBackLimit = 40f;
     [Tooltip("相对释放瞬间角度，允许前倾的角度上限（度）")] [Range(0f, 90f)] public float holdRodForwardLimit = 25f;
 
     [Header("Rod Limits（根节角度限制）")]
     [Tooltip("是否启用根节的角度限制，防止 360° 旋转")] public bool enforceRodLimits = true;
-    [Tooltip("根节最小角（度，负为向后）")] public float rodMinAngleDeg = -70f;
-    [Tooltip("根节最大角（度，正为向前）")] public float rodMaxAngleDeg = 35f;
+    [Tooltip("根节最小角（度，负为向后）")] public float rodMinAngleDeg = -55f;
+    [Tooltip("根节最大角（度，正为向前）")] public float rodMaxAngleDeg = 28f;
 
 	// ------------------------- 内部状态 -------------------------
 	enum Phase { Idle, Charging, Whip, Flight, Landed, Reeling }
