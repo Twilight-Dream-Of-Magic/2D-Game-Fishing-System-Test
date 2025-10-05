@@ -266,9 +266,15 @@ public class FishingPhysics2D : MonoBehaviour
         // 禁用根节马达，Charging 仅用确定性后仰角呈现
         if (hinge1) hinge1.useMotor = false;
 
-        // 目标后仰角（负角度表示向后），使用 SmoothDampAngle 消除 360° 跳变，并且进行硬限制
+        // 依据鼠标方向确定“前/后”的符号（右为前→后仰为负；左为前→后仰为正）
+        Vector2 origin = rodTip ? (Vector2)rodTip.position : (Vector2)transform.position;
+        Vector2 mouse = Camera.main ? (Vector2)Camera.main.ScreenToWorldPoint(Input.mousePosition) : origin + Vector2.right;
+        Vector2 castDir = (mouse - origin).sqrMagnitude > 1e-6f ? (mouse - origin).normalized : Vector2.right;
+        float sideSign = Mathf.Sign(Mathf.Abs(castDir.x) < 1e-4f ? 1f : castDir.x); // 右:+1，左:-1
+
+        // 目标后仰角（按蓄力幅度）
         float t = Mathf.Pow(Mathf.Clamp01(charge01), Mathf.Max(0.0001f, powerCurve));
-        float targetDeg = -Mathf.Abs(maxBackAngleDeg) * t;
+        float targetDeg = -Mathf.Abs(maxBackAngleDeg) * t * sideSign;
         if (enforceRodLimits)
         {
             targetDeg = Mathf.Clamp(targetDeg, rodMinAngleDeg, rodMaxAngleDeg);
