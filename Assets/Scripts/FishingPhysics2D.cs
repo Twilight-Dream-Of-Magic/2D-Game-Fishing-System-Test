@@ -308,9 +308,10 @@ public class FishingPhysics2D : MonoBehaviour
 
         float side = sideSign;
 
-        // 用 FixedUpdate 缓存的真实竿梢速度（与“水平前向”做对齐）
+        // 用 FixedUpdate 缓存的真实竿梢速度；前甩目标方向=鼠标相反的水平向
         Vector2 vTip = tipVelFixed;
-        float tipFwd = (vTip.sqrMagnitude < 1e-6f) ? -999f : Vector2.Dot(vTip.normalized, castDir);
+        Vector2 releaseDir = new Vector2(-side, 0f);
+        float tipFwd = (vTip.sqrMagnitude < 1e-6f) ? -999f : Vector2.Dot(vTip.normalized, releaseDir);
 		bool apex = releaseAtForwardApex && tipFwdPrev > -998f && tipFwdPrev > tipFwd; // 前向速度开始回落
 		tipFwdPrev = tipFwd;
 
@@ -318,13 +319,13 @@ public class FishingPhysics2D : MonoBehaviour
         if (animateRodRootInWhip && RodRoot)
         {
             float p = Mathf.Clamp01(whipT / Mathf.Max(0.02f, whipPulse));
-            float targetDeg = Mathf.Lerp(currentBackAngleDeg, Mathf.Abs(forwardLeanDeg) * side, p);
+            float targetDeg = Mathf.Lerp(currentBackAngleDeg, Mathf.Abs(forwardLeanDeg) * (-side), p);
             if (enforceRodLimits) targetDeg = Mathf.Clamp(targetDeg, rodMinAngleDeg, rodMaxAngleDeg);
             currentBackAngleDeg = Mathf.SmoothDampAngle(currentBackAngleDeg, targetDeg, ref rotSmoothVelDeg, Mathf.Max(0.0001f, rotationSmoothTime));
             ApplySeg1BackAngle(currentBackAngleDeg);
         }
 
-        if (apex || whipT >= whipPulse) ReleaseNow(new Vector2(side, 0f), vTip);
+        if (apex || whipT >= whipPulse) ReleaseNow(releaseDir, vTip);
 	}
 
     void ReleaseNow(Vector2 castDir, Vector2 vTip)
