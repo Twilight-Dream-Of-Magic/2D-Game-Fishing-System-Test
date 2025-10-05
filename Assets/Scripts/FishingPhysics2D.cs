@@ -129,10 +129,9 @@ public class FishingPhysics2D : MonoBehaviour
 
 	// 竿梢“真实”速度（由 Seg3 刚体在 FixedUpdate 计算）
 	Vector2 tipVelFixed;
-    // 鼠标决定的当前抛投方向（相对竿梢）和左右符号
-    Vector2 castDirCached = Vector2.right;     // 鼠标方向（归一化，带Y）
-    Vector2 castDirHorizCached = Vector2.right; // 仅水平前向（左/右）
-    float sideSignCached = 1f; // 右:+1，左:-1
+    // 鼠标决定的当前抛投方向（相对竿梢）和左右符号（简化版）
+    Vector2 castDir = Vector2.right;  // 完整方向（含Y），用于点积判断
+    float sideSign = 1f;              // 水平符号：右=+1，左=-1，用于后仰/前甩与水平初速
 
     // Charging 阶段围绕 RodRoot 的后仰控制（避免 360° 抖动）
     float currentBackAngleDeg;
@@ -236,7 +235,7 @@ public class FishingPhysics2D : MonoBehaviour
         if (Input.GetMouseButtonDown(1)) { CancelInvoke(); StopAllCoroutines(); ResetAll(snapRodAlsoFromEmergencyReset); return; }
 
         // 统一更新一次基于鼠标的抛投方向/左右符号（供全流程使用）
-        UpdateCastDirCached();
+        UpdateCastDir();
 
         // 把阶段逻辑分发给 fsm（内部仍调用当前类的方法）
         fsm.Tick(this, Time.deltaTime);
@@ -278,11 +277,11 @@ public class FishingPhysics2D : MonoBehaviour
 
         // 依据鼠标方向确定“前/后”的符号（右为前→后仰为负；左为前→后仰为正）
         // 依据统一缓存的鼠标方向与左右
-        float sideSign = sideSignCached;
+        float side = sideSign;
 
         // 目标后仰角（按蓄力幅度）
         float t = Mathf.Pow(Mathf.Clamp01(charge01), Mathf.Max(0.0001f, powerCurve));
-        float targetDeg = -Mathf.Abs(maxBackAngleDeg) * t * sideSign;
+        float targetDeg = -Mathf.Abs(maxBackAngleDeg) * t * side;
         if (enforceRodLimits)
         {
             targetDeg = Mathf.Clamp(targetDeg, rodMinAngleDeg, rodMaxAngleDeg);
@@ -307,11 +306,11 @@ public class FishingPhysics2D : MonoBehaviour
 		whipT += dt;
 		bobber.transform.localPosition = Vector3.zero;
 
-        float sideSign = sideSignCached;
+        float side = sideSign;
 
         // 用 FixedUpdate 缓存的真实竿梢速度（与“水平前向”做对齐）
         Vector2 vTip = tipVelFixed;
-        float tipFwd = (vTip.sqrMagnitude < 1e-6f) ? -999f : Vector2.Dot(vTip.normalized, castDirHorizCached);
+        float tipFwd = (vTip.sqrMagnitude < 1e-6f) ? -999f : Vector2.Dot(vTip.normalized, castDir);
 		bool apex = releaseAtForwardApex && tipFwdPrev > -998f && tipFwdPrev > tipFwd; // 前向速度开始回落
 		tipFwdPrev = tipFwd;
 
@@ -319,13 +318,13 @@ public class FishingPhysics2D : MonoBehaviour
         if (animateRodRootInWhip && RodRoot)
         {
             float p = Mathf.Clamp01(whipT / Mathf.Max(0.02f, whipPulse));
-            float targetDeg = Mathf.Lerp(currentBackAngleDeg, Mathf.Abs(forwardLeanDeg) * sideSign, p);
+            float targetDeg = Mathf.Lerp(currentBackAngleDeg, Mathf.Abs(forwardLeanDeg) * side, p);
             if (enforceRodLimits) targetDeg = Mathf.Clamp(targetDeg, rodMinAngleDeg, rodMaxAngleDeg);
             currentBackAngleDeg = Mathf.SmoothDampAngle(currentBackAngleDeg, targetDeg, ref rotSmoothVelDeg, Mathf.Max(0.0001f, rotationSmoothTime));
             ApplySeg1BackAngle(currentBackAngleDeg);
         }
 
-        if (apex || whipT >= whipPulse) ReleaseNow(castDirHorizCached, vTip);
+        if (apex || whipT >= whipPulse) ReleaseNow(new Vector2(side, 0f), vTip);
 	}
 
     void ReleaseNow(Vector2 castDir, Vector2 vTip)
@@ -338,9 +337,8 @@ public class FishingPhysics2D : MonoBehaviour
 		bobber.gravityScale = flightGravity; // 抛物线感觉
 
 		// 初速度：竿梢切向 + 解析前向
-        // 解析前向分量仅取水平向（避免误把朝上的鼠标抬高导致“总是偏左/右”）
-        Vector2 castDirHoriz = castDirHorizCached; // 使用缓存的水平前向
-        Vector2 vInit = vTip * Mathf.Max(0f, tipBoost) + castDirHoriz * v0 * Mathf.Max(0f, extraBoost);
+        // 解析前向分量仅取水平符号，避免Y干扰左右；仍允许 vTip 提供斜向分量
+        Vector2 vInit = vTip * Mathf.Max(0f, tipBoost) + new Vector2(sideSign, 0f) * v0 * Mathf.Max(0f, extraBoost);
 		bobber.linearVelocity = vInit;
 
 		// 飞行：严格“最大长度上限”，略加松弛
@@ -612,16 +610,13 @@ void RestoreRodPoseOnly()
 		}
 }
     // 统一更新鼠标方向缓存（相对竿梢）
-    void UpdateCastDirCached()
+    void UpdateCastDir()
     {
         Vector2 origin = rodTip ? (Vector2)rodTip.position : (Vector2)transform.position;
         Vector2 mouse = Camera.main ? (Vector2)Camera.main.ScreenToWorldPoint(Input.mousePosition) : origin + Vector2.right;
         Vector2 delta = (mouse - origin);
-        castDirCached = delta.sqrMagnitude > 1e-6f ? delta.normalized : Vector2.right;
-        // 水平向量：只取 X 分量符号，避免非常小的X被Y主导
-        float sx = Mathf.Sign(Mathf.Abs(delta.x) < 1e-4f ? 1f : delta.x);
-        castDirHorizCached = new Vector2(sx, 0f);
-        sideSignCached = sx; // 右:+1，左:-1
+        castDir = delta.sqrMagnitude > 1e-6f ? delta.normalized : Vector2.right;
+        sideSign = Mathf.Sign(Mathf.Abs(delta.x) < 1e-4f ? 1f : delta.x); // 右:+1，左:-1
     }
     // 围绕 RodRoot 旋转（不再直接旋转 seg1）
     void ApplySeg1BackAngle(float backDeg)
