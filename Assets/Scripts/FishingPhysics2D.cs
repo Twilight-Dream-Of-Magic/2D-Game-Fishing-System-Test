@@ -91,8 +91,13 @@ public class FishingPhysics2D : MonoBehaviour
     [Tooltip("命中水后需要停留的最短时间，避免“刚碰水就落”")] public float waterSettleDelay = 0.2f;
     [Tooltip("水中锁长的速度阈值，低于则可落")] public float waterLockSpeed = 0.8f;
 
-    [Header("Rope Unleash（起始放开再闭合）")]
-    [Tooltip("释放后绳子完全放开的时长（秒）")] public float ropeUnleashTime = 0.15f;
+    [Header("Rope Simple Control（精简线长控制）")]
+    [Tooltip("最小绳长度")] public float ropeMinLen = 1.8f;
+    [Tooltip("最大绳长度")] public float ropeMaxLen = 7.2f;
+    [Tooltip("需要至少飞行的时间（秒）")] public float ropeRequiredFlightTime = 0.25f;
+    [Tooltip("飞行超时时长（秒），超过则强制落水")] public float ropeFlightTimeout = 1.2f;
+    [Tooltip("解析前向飞行速度（m/s）")] public float ropeFlightSpeed = 12f;
+    [Tooltip("当前是否为无线长度模式（放开上限）")] public bool ropeUnlimited = false;
 
     [Header("Line Renderer")]
     [Min(2)] public int lineSegments = 20;
@@ -298,7 +303,7 @@ public class FishingPhysics2D : MonoBehaviour
 	{
         ChangePhase(Phase.Whip);
 		whipT = 0f; tipFwdPrev = -999f;
-		plannedLen = minCast + (maxCast - minCast) * Mathf.Pow(Mathf.Clamp01(charge01), Mathf.Max(0.05f, powerCurve));
+        plannedLen = Mathf.Lerp(ropeMinLen, ropeMaxLen, Mathf.Pow(Mathf.Clamp01(charge01), Mathf.Max(0.05f, powerCurve)));
 		if (chargeSlider) StartUiFadeOut();
 		PulseHingeTowardMouse();
         if (events?.onWhipBegin != null) events.onWhipBegin.Invoke();
@@ -335,7 +340,7 @@ public class FishingPhysics2D : MonoBehaviour
     void ReleaseNow(Vector2 castDir, Vector2 vTip)
 	{
 		// 解析推算的额外速度（与规划线长 / 阻尼 / 时间窗有关）
-		float v0 = EstimateInitialSpeed(plannedLen, bobber ? bobber.linearDamping : airDrag, flightTime);
+        float v0 = ropeFlightSpeed; // 由精简参数直接控制解析前向速度
 
 		DetachFromTipKeepWorld();
 		bobber.linearDamping = airDrag;
@@ -346,13 +351,20 @@ public class FishingPhysics2D : MonoBehaviour
 		bobber.linearVelocity = vInit;
 
         // 飞行：起始阶段完全放开（不设上限），随后再恢复“最大长度上限”
-		if (rope)
-		{
-			rope.enabled = true;
-            rope.maxDistanceOnly = false; // 完全放开
-            rope.distance = 1e6f;         // 足够大
-            if (ropeUnleashTime > 0f) Invoke(nameof(ReapplyRopeMaxLimit), Mathf.Clamp(ropeUnleashTime, 0.01f, 1.0f));
-		}
+        if (rope)
+        {
+            rope.enabled = true;
+            if (ropeUnlimited)
+            {
+                rope.maxDistanceOnly = false; // 完全放开
+                rope.distance = 1e6f;         // 极大
+            }
+            else
+            {
+                rope.maxDistanceOnly = true;  // 仅上限
+                rope.distance = Mathf.Min(plannedLen, ropeMaxLen);
+            }
+        }
 
         ChangePhase(Phase.Flight);
         castTimer = 0f; tautFrames = 0; sawWater = false; waterHitT = 0f;
@@ -381,8 +393,8 @@ public class FishingPhysics2D : MonoBehaviour
 		bool tight = tipTo >= rope.distance - 0.01f;
 		tautFrames = tight ? (tautFrames + 1) : 0;
 
-        // 如果不是“只在水面落水”，可用拉紧若干帧的早落水
-        if (!landOnlyOnWater && tautFrames >= Mathf.Max(1, tautFramesToLand) && castTimer >= landTimeout * 0.4f) { ForceLand(); return; }
+        // 非仅水面：可用拉紧若干帧的早落水
+        if (!landOnlyOnWater && tautFrames >= Mathf.Max(1, tautFramesToLand) && castTimer >= ropeRequiredFlightTime) { ForceLand(); return; }
 
         // 落水条件（混合）：
         // - landOnlyOnWater=true：需要命中水，且满足（到时 or 入水后延迟达到，且[已绷紧 或 速度慢 或 回向竿梢]）
@@ -394,12 +406,12 @@ public class FishingPhysics2D : MonoBehaviour
 
         if (landOnlyOnWater)
         {
-            if (inWaterNow && (castTimer >= landTimeout || (waterDelayOk && (tight || inward || slowInWater))))
+            if (inWaterNow && (castTimer >= ropeRequiredFlightTime || (waterDelayOk && (tight || inward || slowInWater))))
             { ForceLand(); return; }
         }
         else
         {
-            if (castTimer >= landTimeout)
+            if (castTimer >= ropeFlightTimeout)
             {
                 if (inWaterNow || (tight && inward)) { ForceLand(); return; }
             }
