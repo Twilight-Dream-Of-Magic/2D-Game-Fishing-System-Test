@@ -225,6 +225,9 @@ public class FishingPhysics2D : MonoBehaviour
         // 把阶段逻辑分发给 fsm（内部仍调用当前类的方法）
         fsm.Tick(this, Time.deltaTime);
 
+        // 对 RodRoot 的角度进行全局硬限制（无论哪个阶段）
+        if (enforceRodLimits) EnforceRodRootLimits();
+
         // Pre-Release：刚性整体
         EnsureAttachedDuringPreRelease();
 
@@ -803,6 +806,28 @@ void RestoreRodPoseOnly()
             prev = p; hasPrev = true;
         }
         GUI.color = Color.white;
+    }
+
+    // --------------------------- RodRoot 角度硬限制 ---------------------------
+    void EnforceRodRootLimits()
+    {
+        if (!RodRoot) return;
+        // 计算 RodRoot 当前相对 Home 的 Z 角度（-180..180）
+        Quaternion rel = Quaternion.Inverse(rodRootHomeRot) * RodRoot.localRotation;
+        float zDeg = NormalizeAngle180(rel.eulerAngles.z);
+        float clamped = Mathf.Clamp(zDeg, rodMinAngleDeg, rodMaxAngleDeg);
+        if (!Mathf.Approximately(clamped, zDeg))
+        {
+            RodRoot.localRotation = rodRootHomeRot * Quaternion.Euler(0f, 0f, clamped);
+        }
+    }
+
+    static float NormalizeAngle180(float deg)
+    {
+        deg %= 360f;
+        if (deg > 180f) deg -= 360f;
+        if (deg < -180f) deg += 360f;
+        return deg;
     }
 
     // 简单的线段绘制（OnGUI）
