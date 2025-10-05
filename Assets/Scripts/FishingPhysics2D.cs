@@ -89,6 +89,7 @@ public class FishingPhysics2D : MonoBehaviour
     [Header("Home Pose（复位外观）")]
     public bool snapRodOnReelFinish = true;
     public bool snapRodAlsoFromEmergencyReset = true;
+    [Tooltip("落水时仅复位鱼竿（不回收浮标），用于演示抛进水里即结束")] public bool snapRodOnLand = true;
 
     [Header("Interaction（交互开关）")]
     [Tooltip("飞行期左键是否可随时强制收线（不等超时/绷紧）")] public bool reelAnytime = true;
@@ -375,6 +376,7 @@ public class FishingPhysics2D : MonoBehaviour
         lastCastLen = cur;
         maxCastDistance = Mathf.Max(maxCastDistance, cur);
         if (events?.onLand != null) events.onLand.Invoke();
+        if (snapRodOnLand) RestoreRodPoseOnly();
         Debug.Log($"[Fishing] LANDED lockLen={cur:F2}", this);
 	}
 
@@ -458,6 +460,19 @@ public class FishingPhysics2D : MonoBehaviour
 		AttachToTipKeepWorld();
 		bobber.transform.localPosition = Vector3.zero;
 	}
+
+// 仅复位鱼竿，不处理浮标（用于落水即结束的展示效果）
+void RestoreRodPoseOnly()
+{
+    if (!homeCaptured) return;
+    var b1 = seg1.bodyType; var b2 = seg2.bodyType; var b3 = seg3.bodyType;
+    seg1.bodyType = seg2.bodyType = seg3.bodyType = RigidbodyType2D.Kinematic;
+    seg1Home.Apply(seg1.transform);
+    seg2Home.Apply(seg2.transform);
+    seg3Home.Apply(seg3.transform);
+    tipHome.Apply(rodTip.transform);
+    seg1.bodyType = b1; seg2.bodyType = b2; seg3.bodyType = b3;
+}
 
     void ResetAll(bool snapRod)
 	{
