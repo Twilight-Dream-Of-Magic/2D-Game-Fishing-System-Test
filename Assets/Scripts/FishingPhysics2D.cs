@@ -13,6 +13,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.Events;
+using System.Runtime.ConstrainedExecution;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(LineRenderer))]
@@ -49,7 +50,7 @@ public class FishingPhysics2D : MonoBehaviour
 
 	// Cast Tuning — removed; replaced by Rope Simple Control params
 
-	[Header("Drag (Unity 6 uses linearDamping)")]
+	[Header("Drag (Unity 6 uses Damping)")]
 	public float airDrag = 0.38f;
 	public float waterDrag = 4.5f;
 
@@ -65,9 +66,6 @@ public class FishingPhysics2D : MonoBehaviour
 	[Header("Whip Animation（根节点动画）")]
 	[Tooltip("Whip 阶段是否同时动画 RodRoot 角度")] public bool animateRodRootInWhip = true;
 	[Tooltip("Whip 阶段的目标前倾角（度，整数 0..60）")][Range(0, 60)] public int forwardAngleDeg = 18;
-
-	[Header("Flight Gravity")]
-	[Tooltip("飞行期的重力系数（顶视角 0.10~0.30）")] public float flightGravity = 0.18f;
 
 	[Header("Launch Feel（手感增强）")]
 	[Tooltip("竿梢速度增益")] public float tipBoost = 1.30f;
@@ -125,6 +123,38 @@ public class FishingPhysics2D : MonoBehaviour
 	[Tooltip("是否启用根节的角度限制，防止 360° 旋转")] public bool enforceRodLimits = true;
 	[Tooltip("根节最小角（度，负为向后）")] public float rodMinAngleDeg = -60f;
 	[Tooltip("根节最大角（度，正为向前）")] public float rodMaxAngleDeg = 60f;
+
+	[Header("Flight Gravity")]
+	[Tooltip("飞行期的重力系数（顶视角 0.10~0.30）")]
+	public float flightGravity = 0.18f;
+
+	[Header("Micro/Cap Lock")]
+	[Tooltip("到达cap后是否把浮标设为Kinematic（完全免疫力）")]
+	public bool lockAtCapKinematic = true;
+
+	[Header("Micro Gravity")]
+	[Tooltip("放线期间使用的微重力（不影响放线逻辑）")]
+	public float microGravity = 0.03f;
+
+	bool airLocked;   // 空中锁定后免疫一切外力
+
+	[Header("Charge Limit")]
+	[Tooltip("把蓄力条映射为‘本次抛投的最大线长上限’")]
+	public bool useChargeAsMax = true;
+
+	// 每次抛投时由蓄力计算出的“本次上限”
+	float castMaxLen;
+	float CurrentMaxCap => ropeUnlimited ? ropeMaxLen : (useChargeAsMax ? Mathf.Clamp(castMaxLen, ropeMinLen, ropeMaxLen) : ropeMaxLen);
+	[Header("Air Stop At Cap")]
+	[Tooltip("飞行中一旦到达本次上限并已绷紧，立刻空中锁绳（关重力）")]
+	public bool stopAtCapInAir = true;
+	[Range(1, 4)] public int capTautFrames = 1;   // 需要连续绷紧的帧数
+
+	[Header("Air Cap Lock")]
+	[Tooltip("到 cap 判定的余量")] public float capEps = 0.02f;
+	[Tooltip("离屏时是否直接空中锁死")] public bool forceStopOffscreen = true;
+
+
 
 	// ------------------------- 内部状态 -------------------------
 	public enum Phase { Idle, Charging, Whip, Flight, Landed, Reeling }
@@ -361,6 +391,7 @@ public class FishingPhysics2D : MonoBehaviour
 		bobber.linearVelocity = vInit;
 
 		// 线控：释放时设置
+		castMaxLen = Mathf.Clamp(plannedLen, ropeMinLen, ropeMaxLen);
 		SetRopeForRelease();
 
 		ChangePhase(Phase.Flight);
@@ -376,53 +407,82 @@ public class FishingPhysics2D : MonoBehaviour
 
 	void TickFlight(float dt)
 	{
-		// —— 飞行中持续放线 —— //
+		// 1) 放线插值推进（视觉平滑）
 		if (ropeSpoolOut && rope && rope.maxDistanceOnly)
 		{
 			ropeSpoolElapsed += dt;
 			float t = Mathf.Clamp01(ropeSpoolElapsed / Mathf.Max(0.01f, ropeSpoolTime));
-			// 用平滑 Lerp 把 distance 推向目标；避免一次跳到位
 			float newLen = Mathf.Lerp(rope.distance, ropeTargetLen, t);
-			// 防止数值回退
-			rope.distance = (newLen > rope.distance) ? newLen : rope.distance;
+			rope.distance = (newLen > rope.distance) ? newLen : rope.distance; // 防回退
 		}
 
 		castTimer += dt;
 		if (!bobber || !rope || !rodTip) return;
 
-		// 视口外溢：如果仅水面落水关闭，则强制落水；否则放行由水面判定
-		if (!landOnlyOnWater && IsOffscreen(bobber.position, offscreenMargin)) { LockRopeAtCurrentAndWaterDamping(); return; }
+		// 2) 离屏保护（只保留一套行为：空中锁）
+		if (forceStopOffscreen && IsOffscreen(bobber.position, offscreenMargin))
+		{
+			AirLockAtCap();
+			return;
+		}
 
-		// 混合逻辑：记录首次命中水的时刻，但不立即落水
+		// 3) 水体命中仅做记录（放线阶段不触发落水）
 		bool inWaterNow = Physics2D.OverlapPoint(bobber.position, waterMask) != null;
 		if (inWaterNow && !sawWater) { sawWater = true; waterHitT = castTimer; }
 
+		// 4) 基础量
+		float cap = CurrentMaxCap;
 		float tipTo = Vector2.Distance(rodTip.position, bobber.position);
 		bool tight = tipTo >= rope.distance - 0.01f;
 		tautFrames = tight ? (tautFrames + 1) : 0;
 
-		if (IsSpooling()) return;                                   // 还在“放线动画”
-		if (castTimer < ropeRequiredFlightTime) return;             // 飞行至少跑这么久
-		if (tipTo < ropeMinLen - 0.01f) return;                     // 连最短线长都没拉开
+		// 5) 硬封顶：distance 不得超过 cap
+		if (rope.maxDistanceOnly) rope.distance = Mathf.Min(rope.distance, cap);
 
-		// 非仅水面：可用拉紧若干帧的早落水
-		bool spooling = ropeSpoolOut && rope.maxDistanceOnly && rope.distance < ropeTargetLen - 0.01f;
-		if (!landOnlyOnWater && !spooling && tautFrames >= Mathf.Max(1, tautFramesToLand) && castTimer >= ropeRequiredFlightTime)
+		// 6) 兜底：即便关闭了 RopeSpoolOut，只要被拉紧也把 distance 往 cap 推
+		if (!ropeSpoolOut && rope.maxDistanceOnly && tight)
+		{
+			float slack = Mathf.Max(0f, ropeSlackRatio) * cap;
+			rope.distance = Mathf.Min(cap, Mathf.Max(rope.distance, tipTo + slack));
+		}
+
+		// 7) 放线进行中：给微重力并**跳过**一切落水逻辑
+		bool spoolingHard = rope.maxDistanceOnly && rope.distance < cap - 0.005f;
+		if (spoolingHard)
+		{
+			bobber.gravityScale = Mathf.Max(0f, microGravity);
+			return;
+		}
+
+		// 放线结束：恢复飞行重力（若未锁）
+		if (!airLocked) bobber.gravityScale = flightGravity;
+
+		// 8) 到达 cap：以真实距离判定并空中锁
+		bool nearCap = tipTo >= cap - capEps;
+		if (stopAtCapInAir && nearCap && castTimer >= ropeRequiredFlightTime)
+		{
+			AirLockAtCap();
+			return;
+		}
+
+		// 9) 允许“非水面早落水”才走这一支
+		if (!landOnlyOnWater && tautFrames >= Mathf.Max(1, tautFramesToLand) && castTimer >= ropeRequiredFlightTime)
+		{
+			LockRopeAtCurrentAndWaterDamping(); // 老的“落入水/地”锁法
+			return;
+		}
+
+		// 10) 水面落水（稳定后判定）
+		Vector2 toTip = (Vector2)rodTip.position - bobber.position;
+		bool inward = Vector2.Dot(toTip, bobber.linearVelocity) > 0f || bobber.linearVelocity.sqrMagnitude < 0.0004f;
+		bool slowInWater = bobber.linearVelocity.sqrMagnitude <= waterLockSpeed * waterLockSpeed;
+		if (ShouldForceLand(inWaterNow, tight, inward, slowInWater))
 		{
 			LockRopeAtCurrentAndWaterDamping();
 			return;
 		}
-
-		// 落水条件（混合）：
-		// - landOnlyOnWater=true：需要命中水，且满足（到时 or 入水后延迟达到，且[已绷紧 或 速度慢 或 回向竿梢]）
-		// - landOnlyOnWater=false：原有条件即可
-		Vector2 toTip = (Vector2)rodTip.position - bobber.position;
-		bool inward = Vector2.Dot(toTip, bobber.linearVelocity) > 0f || bobber.linearVelocity.sqrMagnitude < 0.0004f;
-		bool slowInWater = bobber.linearVelocity.sqrMagnitude <= waterLockSpeed * waterLockSpeed;
-		bool waterDelayOk = sawWater && (castTimer - waterHitT) >= Mathf.Max(0f, waterSettleDelay);
-
-		if (ShouldForceLand(inWaterNow, tight, inward, slowInWater)) { LockRopeAtCurrentAndWaterDamping(); return; }
 	}
+
 
 	bool IsOffscreen(Vector3 worldPos, float margin)
 	{
@@ -431,21 +491,54 @@ public class FishingPhysics2D : MonoBehaviour
 		return v.x < -margin || v.x > 1f + margin || v.y < -margin || v.y > 1f + margin;
 	}
 
+	void AirLockAtCap()
+	{
+		if (!bobber || !rodTip) return;
+
+		float cap = CurrentMaxCap;
+		float tipTo = Vector2.Distance(rodTip.position, bobber.position);
+		float clamped = Mathf.Clamp(tipTo, ropeMinLen, cap);
+
+		// 固定在当前长度；视觉上仍能画线
+		if (rope)
+		{
+			rope.enabled = false;           // 彻底断开物理约束，避免再牵动
+			rope.maxDistanceOnly = false;   // 无所谓，但保持一致
+			rope.distance = clamped;        // 只留作记录
+		}
+
+		// 完全免疫一切力
+		bobber.linearVelocity = Vector2.zero;
+		bobber.angularVelocity = 0f;
+		bobber.gravityScale = 0f;
+		bobber.linearDamping = airDrag;     // 维持空气阻尼（不是水）
+		bobber.bodyType = RigidbodyType2D.Kinematic;
+
+		airLocked = true;
+		ChangePhase(Phase.Landed);          // 此时左键可开始收线
+		Debug.Log($"[Fishing] AIR-LOCK cap={cap:F2} tipTo={tipTo:F2}", this);
+	}
+
+
 	void LockRopeAtCurrentAndWaterDamping()
 	{
 		float cur = Vector2.Distance(rodTip.position, bobber.position);
-		float clamped = Mathf.Clamp(cur, ropeMinLen, ropeMaxLen);   // 落水后的“物理长度”落在最小/最大之间
+		// 落水后的实际长度 ∈ [min, 本次上限]
+		float clamped = Mathf.Clamp(cur, ropeMinLen, CurrentMaxCap);
+
+		Debug.Log($"[Fishing] LANDED raw={cur:F2} clamp={clamped:F2} cap={CurrentMaxCap:F2}", this);
+
 		if (rope)
 		{
 			rope.enabled = true;
-			rope.maxDistanceOnly = false; // 精确长度模式
+			rope.maxDistanceOnly = false; // 固定精确长度
 			rope.distance = clamped;
-			CancelInvoke(nameof(ReapplyRopeMaxLimit));
 		}
 		bobber.linearVelocity = Vector2.zero;
 		bobber.angularVelocity = 0f;
 		bobber.linearDamping = waterDrag;
 		bobber.gravityScale = 0f;
+
 		ChangePhase(Phase.Landed);
 		castCount++;
 		lastCastLen = cur;
@@ -479,34 +572,45 @@ public class FishingPhysics2D : MonoBehaviour
 
 	void BeginReel()
 	{
+		if (airLocked)
+		{
+			// 重新接回物理世界
+			bobber.bodyType = RigidbodyType2D.Dynamic;
+
+			if (rope)
+			{
+				rope.enabled = true;
+				rope.maxDistanceOnly = false; // 收线是“绝对距离”模式
+				rope.distance = Vector2.Distance(rodTip.position, bobber.position);
+			}
+
+			airLocked = false;
+		}
+
 		ChangePhase(Phase.Reeling);
 		if (rope) rope.maxDistanceOnly = false; // 绝对长度模式：distance 变短会“拖回来”
 		if (events?.onReelStart != null) events.onReelStart.Invoke();
 		Debug.Log("[Fishing] Reel start", this);
 	}
 
-	// 在起始完全放开后，恢复到“最大长度上限”并设置目标上限为 plannedLen*(1+slack)
-	void ReapplyRopeMaxLimit()
-	{
-		if (!rope || !rodTip || !bobber) return;
-		rope.maxDistanceOnly = true;
-		rope.distance = Mathf.Min(plannedLen, ropeMaxLen);
-	}
-
 	// 统一设置：释放时线状态（使用精简参数）
 	void SetRopeForRelease()
 	{
-		if (!rope) 
-			return;
+		if (!rope) return;
 		rope.enabled = true;
-		// 飞行期：用“最大长度模式”，且上限=计划长度（直接到位，不要从最短开始）
+
+		// 飞行：用“最大长度模式”，上限 = 本次上限（不突破）
 		rope.maxDistanceOnly = true;
 
-		// === “逐渐放线”的动画
-		rope.distance   = Mathf.Min(ropeMinLen, ropeMaxLen);
-		ropeTargetLen   = Mathf.Min(plannedLen * (1f + Mathf.Abs(ropeSlackRatio)), ropeMaxLen);
+		// 起步从最短（或本次上限更小者）
+		float startLen = Mathf.Min(ropeMinLen, CurrentMaxCap);
+		rope.distance = startLen;
+
+		// 放线动画朝“本次上限”推进（不再用 >cap 的 slack）
+		ropeTargetLen = CurrentMaxCap;
 		ropeSpoolElapsed = 0f;
 	}
+
 
 	// 仅水面落水的判断：删除“到时就落”，改为“入水后稳定 + (绷紧/变慢/回向)”才落
 
@@ -613,6 +717,9 @@ public class FishingPhysics2D : MonoBehaviour
 		uiFading = false; uiFadeT = 0f; whipT = 0f; tipFwdPrev = -999f; tautFrames = 0;
 		tipVelFixed = Vector2.zero;
 
+		castMaxLen = 0f;
+		airLocked = false;
+
 		// —— 线关节：彻底关闭并清零 —— //
 		if (rope) { rope.enabled = false; rope.maxDistanceOnly = true; rope.distance = 0f; }
 
@@ -691,7 +798,7 @@ public class FishingPhysics2D : MonoBehaviour
 		Vector2 delta = (mouse - origin);
 		sideSign = (delta.x >= 0f) ? 1f : -1f;
 	}
-	// 围绕 RodRoot 旋转（不再直接旋转 seg1）
+	// 围绕 RodRoot 旋转
 	void ApplyRootBackAngle(float backDeg)
 	{
 		if (!RodRoot) return;
@@ -794,7 +901,7 @@ public class FishingPhysics2D : MonoBehaviour
 		Vector3 A = rodTip.position, B = bobber.position;
 		float L = Vector2.Distance(A, B);
 		float Lc = Mathf.Min(L, ropeMaxLen * 1.5f);
-		bool sagging = (phase == Phase.Landed || phase == Phase.Reeling);
+		bool sagging = (phase == Phase.Landed || phase == Phase.Reeling) && !airLocked;
 		float sag = sagging ? 0.10f : 0f;
 
 		for (int i = 0; i <= N; i++)
@@ -892,7 +999,6 @@ public class FishingPhysics2D : MonoBehaviour
 		if (!showDebugOverlay) return;
 		const float pad = 8f;
 		float y = pad;
-		float lineH = 18f;
 		string p = phase.ToString();
 		string txt = $"Phase: {p}\nCasts: {castCount}  MaxLen: {maxCastDistance:F2}\nRelease v: {lastReleaseSpeed:F2}\nTip v: {tipVelFixed.magnitude:F2}\nDist: {(rodTip && bobber ? Vector2.Distance(rodTip.position, bobber.position) : 0f):F2}\nReelAny: {reelAnytime} HoldFwd: {holdRodForward}";
 		Vector2 size = hudStyle.CalcSize(new GUIContent(txt));
