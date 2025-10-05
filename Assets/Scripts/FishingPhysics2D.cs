@@ -673,12 +673,12 @@ void RestoreRodPoseOnly()
 	void PulseHingeTowardMouse()
 	{
 		if (!hinge1 || !seg1 || !rodTip) return;
-		Vector2 origin = rodTip.position;
-		Vector2 mouse = Camera.main ? (Vector2)Camera.main.ScreenToWorldPoint(Input.mousePosition) : origin + Vector2.right;
-		Vector2 castDir = (mouse - origin).sqrMagnitude > 1e-6f ? (mouse - origin).normalized : Vector2.right;
+        // 使用镜像甩逻辑：前甩方向为“与鼠标相反的水平向”
+        float side = sideSign; // 右=+1，左=-1（已在 UpdateCastDir() 更新）
+        Vector2 releaseDir = new Vector2(-side, 0f);
 
-		Vector2 axis = ((Vector2)rodTip.position - (Vector2)seg1.position).normalized;
-		float sign = Mathf.Sign(Vector2.SignedAngle(axis, castDir));
+        Vector2 axis = ((Vector2)rodTip.position - (Vector2)seg1.position).normalized;
+        float sign = Mathf.Sign(Vector2.SignedAngle(axis, releaseDir));
 		var m = hinge1.motor;
 		m.motorSpeed = sign * Mathf.Abs(whipMotorSpeed);
 		m.maxMotorTorque = 1e6f;
