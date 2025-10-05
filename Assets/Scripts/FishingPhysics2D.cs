@@ -420,7 +420,7 @@ public class FishingPhysics2D : MonoBehaviour
         if (reelAnytime)
         {
             // 直接强制落水并开始收线
-            ForceLand();
+            LockRopeAtCurrentAndWaterDamping();
             BeginReel();
             Debug.Log("[Fishing] Begin reel from Flight (anytime)", this);
             return;
@@ -868,7 +868,7 @@ void RestoreRodPoseOnly()
         {
             DrawGraph(new Rect(pad, y, 260, 80), speedHistory, Color.cyan, 0f, 10f);
             y += 90;
-            DrawGraph(new Rect(pad, y, 260, 80), distHistory, Color.yellow, 0f, Mathf.Max(1f, maxCast));
+            DrawGraph(new Rect(pad, y, 260, 80), distHistory, Color.yellow, 0f, Mathf.Max(1f, ropeMaxLen));
             y += 90;
         }
     }
@@ -974,9 +974,9 @@ void RestoreRodPoseOnly()
     // --------------------------- 有限状态机（同文件内隔离） ---------------------------
     public class PhaseMachine
     {
-        public Phase current;
-        public void Init(Phase initial) { current = initial; }
-        public void Set(Phase next) { current = next; }
+        public FishingPhysics2D.Phase current;
+        public void Init(FishingPhysics2D.Phase initial) { current = initial; }
+        public void Set(FishingPhysics2D.Phase next) { current = next; }
         public void Tick(FishingPhysics2D ctx, float dt)
         {
             switch (current)
