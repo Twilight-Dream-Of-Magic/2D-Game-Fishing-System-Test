@@ -74,7 +74,7 @@ public class FishingPhysics2D : MonoBehaviour
     [Tooltip("蓄力曲线 >1 变硬，<1 变软")] public float powerCurve = 1.20f;
 
     [Header("Launch Feel（竿身旋转）")]
-    [Tooltip("蓄满时的最大后仰角（度，负值为向后）")] public float maxBackAngleDeg = 55f;
+    [Tooltip("蓄满时的最大后仰角（度）")] public float maxBackAngleDeg = 55f;
     [Tooltip("Charging 时竿身旋转的平滑时间（秒）")] public float rotationSmoothTime = 0.06f;
 
     [Header("Flight Lock（视觉友好落水）")]
@@ -112,13 +112,12 @@ public class FishingPhysics2D : MonoBehaviour
     [Header("Rod Forward Hold（抛出后前倾保持）")]
     [Tooltip("抛出后短时间把根节角度限制在前倾区间")] public bool holdRodForward = true;
     [Tooltip("保持时长（秒）")] public float holdForwardDuration = 0.55f;
-    [Tooltip("相对释放瞬间角度，允许后仰的角度上限（度）")] [Range(0f, 90f)] public float holdRodBackLimit = 40f;
-    [Tooltip("相对释放瞬间角度，允许前倾的角度上限（度）")] [Range(0f, 90f)] public float holdRodForwardLimit = 25f;
+    // 保留由 Rod Limits 全局限制，不再单独暴露 holdRodBackLimit/ForwardLimit
 
     [Header("Rod Limits（根节角度限制）")]
     [Tooltip("是否启用根节的角度限制，防止 360° 旋转")] public bool enforceRodLimits = true;
-    [Tooltip("根节最小角（度，负为向后）")] public float rodMinAngleDeg = -55f;
-    [Tooltip("根节最大角（度，正为向前）")] public float rodMaxAngleDeg = 28f;
+    [Tooltip("根节最小角（度，负为向后）")] public float rodMinAngleDeg = -60f;
+    [Tooltip("根节最大角（度，正为向前）")] public float rodMaxAngleDeg = 60f;
 
 	// ------------------------- 内部状态 -------------------------
 	enum Phase { Idle, Charging, Whip, Flight, Landed, Reeling }
@@ -664,8 +663,8 @@ void RestoreRodPoseOnly()
         float baseAngle = Mathf.Clamp(hinge1.jointAngle, rodMinAngleDeg, rodMaxAngleDeg); // 当前角度（度）
         var limits = new JointAngleLimits2D
         {
-            min = enforceRodLimits ? rodMinAngleDeg : baseAngle - Mathf.Abs(holdRodBackLimit),
-            max = enforceRodLimits ? rodMaxAngleDeg : baseAngle + Mathf.Abs(holdRodForwardLimit)
+            min = rodMinAngleDeg,
+            max = rodMaxAngleDeg
         };
 
         hinge1.useMotor = false; // 停止进一步驱动，避免与限制冲突
