@@ -345,21 +345,8 @@ public class FishingPhysics2D : MonoBehaviour
         Vector2 vInit = vTip * Mathf.Max(0f, tipBoost) + castDir.normalized * v0 * Mathf.Max(0f, extraBoost);
 		bobber.linearVelocity = vInit;
 
-        // 飞行：起始阶段完全放开（不设上限），随后再恢复“最大长度上限”
-        if (rope)
-        {
-            rope.enabled = true;
-            if (ropeUnlimited)
-            {
-                rope.maxDistanceOnly = false; // 完全放开
-                rope.distance = 1e6f;         // 极大
-            }
-            else
-            {
-                rope.maxDistanceOnly = true;  // 仅上限
-                rope.distance = Mathf.Min(plannedLen, ropeMaxLen);
-            }
-        }
+        // 线控：释放时设置
+        SetRopeForRelease();
 
         ChangePhase(Phase.Flight);
         castTimer = 0f; tautFrames = 0; sawWater = false; waterHitT = 0f;
@@ -378,7 +365,7 @@ public class FishingPhysics2D : MonoBehaviour
 		if (!bobber || !rope || !rodTip) return;
 
         // 视口外溢：如果仅水面落水关闭，则强制落水；否则放行由水面判定
-        if (!landOnlyOnWater && IsOffscreen(bobber.position, offscreenMargin)) { ForceLand(); return; }
+        if (!landOnlyOnWater && IsOffscreen(bobber.position, offscreenMargin)) { LockRopeAtCurrentAndWaterDamping(); return; }
 
         // 混合逻辑：记录首次命中水的时刻，但不立即落水
         bool inWaterNow = Physics2D.OverlapPoint(bobber.position, waterMask) != null;
@@ -389,7 +376,7 @@ public class FishingPhysics2D : MonoBehaviour
 		tautFrames = tight ? (tautFrames + 1) : 0;
 
         // 非仅水面：可用拉紧若干帧的早落水
-        if (!landOnlyOnWater && tautFrames >= Mathf.Max(1, tautFramesToLand) && castTimer >= ropeRequiredFlightTime) { ForceLand(); return; }
+        if (!landOnlyOnWater && tautFrames >= Mathf.Max(1, tautFramesToLand) && castTimer >= ropeRequiredFlightTime) { LockRopeAtCurrentAndWaterDamping(); return; }
 
         // 落水条件（混合）：
         // - landOnlyOnWater=true：需要命中水，且满足（到时 or 入水后延迟达到，且[已绷紧 或 速度慢 或 回向竿梢]）
@@ -399,18 +386,7 @@ public class FishingPhysics2D : MonoBehaviour
         bool slowInWater = bobber.linearVelocity.sqrMagnitude <= waterLockSpeed * waterLockSpeed;
         bool waterDelayOk = sawWater && (castTimer - waterHitT) >= Mathf.Max(0f, waterSettleDelay);
 
-        if (landOnlyOnWater)
-        {
-            if (inWaterNow && (castTimer >= ropeRequiredFlightTime || (waterDelayOk && (tight || inward || slowInWater))))
-            { ForceLand(); return; }
-        }
-        else
-        {
-            if (castTimer >= ropeFlightTimeout)
-            {
-                if (inWaterNow || (tight && inward)) { ForceLand(); return; }
-            }
-        }
+        if (ShouldForceLand(inWaterNow, tight, inward, slowInWater)) { LockRopeAtCurrentAndWaterDamping(); return; }
 	}
 
 	bool IsOffscreen(Vector3 worldPos, float margin)
@@ -420,14 +396,14 @@ public class FishingPhysics2D : MonoBehaviour
 		return v.x < -margin || v.x > 1f + margin || v.y < -margin || v.y > 1f + margin;
 	}
 
-    void ForceLand()
-	{
-		float cur = Vector2.Distance(rodTip.position, bobber.position);
+    void LockRopeAtCurrentAndWaterDamping()
+    {
+        float cur = Vector2.Distance(rodTip.position, bobber.position);
         if (rope) { rope.enabled = true; rope.maxDistanceOnly = false; rope.distance = cur; CancelInvoke(nameof(ReapplyRopeMaxLimit)); }
-		bobber.linearVelocity = Vector2.zero;
-		bobber.angularVelocity = 0f;
-		bobber.linearDamping = waterDrag;
-		bobber.gravityScale = 0f;
+        bobber.linearVelocity = Vector2.zero;
+        bobber.angularVelocity = 0f;
+        bobber.linearDamping = waterDrag;
+        bobber.gravityScale = 0f;
         ChangePhase(Phase.Landed);
         castCount++;
         lastCastLen = cur;
@@ -435,7 +411,7 @@ public class FishingPhysics2D : MonoBehaviour
         if (events?.onLand != null) events.onLand.Invoke();
         if (snapRodOnLand) RestoreRodPoseOnly();
         Debug.Log($"[Fishing] LANDED lockLen={cur:F2}", this);
-	}
+    }
 
 	void TryBeginReelFromFlight()
 	{
@@ -472,7 +448,41 @@ public class FishingPhysics2D : MonoBehaviour
     {
         if (!rope || !rodTip || !bobber) return;
         rope.maxDistanceOnly = true;
-        rope.distance = Mathf.Min(plannedLen * (1f + Mathf.Abs(slackRatio)), maxCast);
+        rope.distance = Mathf.Min(plannedLen, ropeMaxLen);
+    }
+
+    // 统一设置：释放时线状态（使用精简参数）
+    void SetRopeForRelease()
+    {
+        if (!rope) return;
+        rope.enabled = true;
+        if (ropeUnlimited)
+        {
+            rope.maxDistanceOnly = false;
+            rope.distance = 1e6f;
+        }
+        else
+        {
+            rope.maxDistanceOnly = true;
+            rope.distance = Mathf.Min(plannedLen, ropeMaxLen);
+        }
+    }
+
+    // 统一判断：是否应当强制落水（锁长）
+    bool ShouldForceLand(bool inWaterNow, bool tight, bool inward, bool slowInWater)
+    {
+        if (landOnlyOnWater)
+        {
+            if (inWaterNow && (castTimer >= ropeRequiredFlightTime || (sawWater && (castTimer - waterHitT) >= Mathf.Max(0f, waterSettleDelay) && (tight || inward || slowInWater))))
+                return true;
+            return false;
+        }
+        else
+        {
+            if (tautFrames >= Mathf.Max(1, tautFramesToLand) && castTimer >= ropeRequiredFlightTime) return true;
+            if (castTimer >= ropeFlightTimeout && (inWaterNow || (tight && inward))) return true;
+            return false;
+        }
     }
 
 	void TickReeling(float dt)
