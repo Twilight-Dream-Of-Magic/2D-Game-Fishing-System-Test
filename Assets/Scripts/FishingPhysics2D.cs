@@ -63,7 +63,7 @@ public class FishingPhysics2D : MonoBehaviour
     [Tooltip("马达使用镜像甩规则（右后仰→向左甩，左后仰→向右甩）")] public bool motorMirror = true;
     [Header("Whip Animation（根节点动画）")]
     [Tooltip("Whip 阶段是否同时动画 RodRoot 角度")] public bool animateRodRootInWhip = true;
-    [Tooltip("Whip 阶段的目标前倾角（度）")] public float forwardLeanDeg = 18f;
+    [Tooltip("Whip 阶段的目标前倾角（度，整数 0..60）")][Range(0,60)] public int forwardAngleDeg = 18;
 
     [Header("Flight Gravity")]
     [Tooltip("飞行期的重力系数（顶视角 0.10~0.30）")] public float flightGravity = 0.18f;
@@ -74,7 +74,7 @@ public class FishingPhysics2D : MonoBehaviour
     [Tooltip("蓄力曲线 >1 变硬，<1 变软")] public float powerCurve = 1.20f;
 
     [Header("Launch Feel（竿身旋转）")]
-    [Tooltip("蓄满时的最大后仰角（度）")] public float maxBackAngleDeg = 55f;
+    [Tooltip("蓄满时的最大后仰角（度，整数 0..60）")][Range(0,60)] public int backAngleDeg = 55;
     [Tooltip("Charging 时竿身旋转的平滑时间（秒）")] public float rotationSmoothTime = 0.06f;
 
     [Header("Flight Lock（视觉友好落水）")]
@@ -284,8 +284,8 @@ public class FishingPhysics2D : MonoBehaviour
 
         // 目标后仰角（按蓄力幅度）
         float t = Mathf.Pow(Mathf.Clamp01(charge01), Mathf.Max(0.0001f, powerCurve));
-        // 镜像旋转鱼竿：右手后仰=负，左手后仰=正 → 加镜像取反 side
-        float targetDeg = -Mathf.Abs(maxBackAngleDeg) * t * (-side);
+        // 竿身后仰角由整数 backAngleDeg 决定，镜像并夹紧到全局 Rod Limits
+        float targetDeg = -Mathf.Abs(backAngleDeg) * t * (-side);
         if (enforceRodLimits)
         {
             targetDeg = Mathf.Clamp(targetDeg, rodMinAngleDeg, rodMaxAngleDeg);
@@ -323,7 +323,7 @@ public class FishingPhysics2D : MonoBehaviour
         if (animateRodRootInWhip && RodRoot)
         {
             float p = Mathf.Clamp01(whipT / Mathf.Max(0.02f, whipPulse));
-            float targetDeg = Mathf.Lerp(currentBackAngleDeg, Mathf.Abs(forwardLeanDeg) * (-side), p);
+            float targetDeg = Mathf.Lerp(currentBackAngleDeg, Mathf.Abs(forwardAngleDeg) * (-side), p);
             if (enforceRodLimits) targetDeg = Mathf.Clamp(targetDeg, rodMinAngleDeg, rodMaxAngleDeg);
             currentBackAngleDeg = Mathf.SmoothDampAngle(currentBackAngleDeg, targetDeg, ref rotSmoothVelDeg, Mathf.Max(0.0001f, rotationSmoothTime));
             ApplySeg1BackAngle(currentBackAngleDeg);
