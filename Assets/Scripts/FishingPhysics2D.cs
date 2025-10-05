@@ -515,7 +515,7 @@ public class FishingPhysics2D : MonoBehaviour
 			if (bobber.transform.parent != rodTip.transform) AttachToTipKeepWorld();
 			bobber.transform.localPosition = Vector3.zero;
 		}
-
+}
     // --------------------------- 竿前倾保持 ---------------------------
     void HoldRodForwardTemporarily()
     {
@@ -553,7 +553,7 @@ public class FishingPhysics2D : MonoBehaviour
         hinge1.motor = hingePrevMotor;
         hingeHoldActive = false;
     }
-	}
+
 
 	// --------------------------- 实用小块 ---------------------------
 	void PulseHingeTowardMouse()
