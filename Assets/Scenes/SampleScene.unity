@@ -747,14 +747,14 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 319760381}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalRotation: {x: 0, y: 0, z: -0.7071068, w: 0.7071068}
+  m_LocalPosition: {x: 0, y: -0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 2002643241}
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: -90}
 --- !u!50 &319760383
 Rigidbody2D:
   serializedVersion: 5
@@ -832,7 +832,7 @@ HingeJoint2D:
   m_BreakAction: 3
   m_AutoConfigureConnectedAnchor: 1
   m_Anchor: {x: 0, y: 0}
-  m_ConnectedAnchor: {x: 0, y: 0}
+  m_ConnectedAnchor: {x: -0, y: 0}
   m_UseConnectedAnchor: 1
   m_UseMotor: 0
   m_Motor:
@@ -854,7 +854,7 @@ Rigidbody2D:
   m_Simulated: 1
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
-  m_Mass: 1
+  m_Mass: 0.0001
   m_LinearDamping: 2
   m_AngularDamping: 2
   m_GravityScale: 0
@@ -1165,7 +1165,7 @@ HingeJoint2D:
   m_BreakAction: 3
   m_AutoConfigureConnectedAnchor: 1
   m_Anchor: {x: 0, y: 0}
-  m_ConnectedAnchor: {x: 0, y: 0}
+  m_ConnectedAnchor: {x: -0, y: 0}
   m_UseConnectedAnchor: 1
   m_UseMotor: 0
   m_Motor:
@@ -1187,7 +1187,7 @@ Rigidbody2D:
   m_Simulated: 1
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
-  m_Mass: 1
+  m_Mass: 0.0001
   m_LinearDamping: 2
   m_AngularDamping: 2
   m_GravityScale: 0
@@ -1538,10 +1538,63 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1ff9b14384a474644a148a14ca0f1c98, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  events:
+    onChargeStart:
+      m_PersistentCalls:
+        m_Calls: []
+    onWhipBegin:
+      m_PersistentCalls:
+        m_Calls: []
+    onRelease:
+      m_PersistentCalls:
+        m_Calls: []
+    onLand:
+      m_PersistentCalls:
+        m_Calls: []
+    onReelStart:
+      m_PersistentCalls:
+        m_Calls: []
+    onReelFinish:
+      m_PersistentCalls:
+        m_Calls: []
+    onReset:
+      m_PersistentCalls:
+        m_Calls: []
+  showDebugOverlay: 0
+  showGraphs: 0
+  logPhaseChanges: 1
+  historyCapacity: 300
+  graphScale: 80
+  devHotkeys: 1
+  applyConfigOnAwake: 0
+  config:
+    airDrag: 0.4
+    waterDrag: 4.5
+    whipMotorSpeed: 1450
+    whipPulse: 0.14
+    releaseAtForwardApex: 1
+    flightGravity: 0.18
+    slackRatio: 0.06
+    tautFramesToLand: 2
+    offscreenMargin: 0.05
+    landOnlyOnWater: 1
+    tipBoost: 1.6
+    extraBoost: 1.1
+    powerCurve: 1.2
+    reelRate: 6.5
+    reelForce: 14
+    reelAnytime: 1
+    lineSegments: 20
+    pixelsPerUnit: 128
+    sortingOrder: 10
+    lineColor: {r: 1, g: 0.1, b: 0.6, a: 1}
+    holdRodForward: 1
+    holdForwardDuration: 0.6
   chargeSlider: {fileID: 775632984}
   waterMask:
     serializedVersion: 2
     m_Bits: 16
+  RodRoot: {fileID: 319760382}
   seg1: {fileID: 2002643243}
   seg2: {fileID: 486999485}
   seg3: {fileID: 686797899}
@@ -1551,59 +1604,55 @@ MonoBehaviour:
   hinge3: {fileID: 686797898}
   bobber: {fileID: 1314692218}
   rope: {fileID: 1314692216}
-  minCast: 4
-  maxCast: 8
-  chargeSpeed: 1.6
-  flightTime: 0.35
-  landTimeout: 3
   airDrag: 0.4
   waterDrag: 4
   reelRate: 6
   reelForce: 12
-  whipMotorSpeed: 1200
-  whipPulse: 0.09
+  whipMotorSpeed: 1000
+  whipPulse: 0.25
   releaseAtForwardApex: 1
-  flightGravity: 0.15
+  motorMirror: 1
+  animateRodRootInWhip: 1
+  forwardAngleDeg: 18
   tipBoost: 1.6
   extraBoost: 1.1
-  powerCurve:
-    serializedVersion: 2
-    m_Curve:
-    - serializedVersion: 3
-      time: 0
-      value: 0.05
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0
-      outWeight: 0
-    - serializedVersion: 3
-      time: 1
-      value: 1
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0
-      outWeight: 0
-    m_PreInfinity: 2
-    m_PostInfinity: 2
-    m_RotationOrder: 4
-  minLaunchSpeed: 5
-  maxLaunchSpeed: 28
-  inheritTip: 1
-  lineSegments: 16
-  pixelsPerUnit: 128
-  sortingOrder: 10
-  lineColor: {r: 1, g: 0.1, b: 0.6, a: 1}
-  watchdogFactor: 3
-  drawDebugLine: 1
-  snapRodOnReelFinish: 1
-  snapRodAlsoFromEmergencyReset: 1
+  powerCurve: 1.15
+  backAngleDeg: 55
+  rotationSmoothTime: 0.06
   slackRatio: 0.12
   tautFramesToLand: 2
   offscreenMargin: 0.04
+  landOnlyOnWater: 1
+  waterSettleDelay: 0.2
+  waterLockSpeed: 0.8
+  ropeMinLen: 2
+  ropeMaxLen: 4
+  ropeRequiredFlightTime: 3
+  ropeFlightTimeout: 5
+  ropeFlightSpeed: 24
+  ropeUnlimited: 0
+  useChargeAsMax: 1
+  stopAtCapInAir: 1
+  capTautFrames: 1
+  ropeSpoolOut: 1
+  ropeSpoolTime: 0.28
+  ropeSlackRatio: 0.06
+  lineSegments: 16
+  pixelsPerUnit: 128
+  sortingOrder: 2
+  lineColor: {r: 1, g: 0.1, b: 0.6, a: 1}
+  drawDebugLine: 1
+  snapRodOnReelFinish: 1
+  snapRodAlsoFromEmergencyReset: 1
+  snapRodOnLand: 1
+  reelAnytime: 1
+  holdRodForward: 1
+  holdForwardDuration: 0.6
+  enforceRodLimits: 1
+  rodMinAngleDeg: -60
+  rodMaxAngleDeg: 60
+  flightGravity: 0.1
+  microGravity: 0.01
 --- !u!1 &1246818911
 GameObject:
   m_ObjectHideFlags: 0
@@ -1924,7 +1973,7 @@ Rigidbody2D:
   m_Simulated: 1
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
-  m_Mass: 1
+  m_Mass: 0.0001
   m_LinearDamping: 2
   m_AngularDamping: 2
   m_GravityScale: 0
@@ -2248,14 +2297,14 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2002643240}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: -0.38268343, w: 0.92387956}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 2, y: 2, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 486999483}
   m_Father: {fileID: 319760382}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: -45}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!233 &2002643242
 HingeJoint2D:
   m_ObjectHideFlags: 0
@@ -2272,7 +2321,7 @@ HingeJoint2D:
   m_BreakAction: 3
   m_AutoConfigureConnectedAnchor: 1
   m_Anchor: {x: 0, y: 0}
-  m_ConnectedAnchor: {x: 0, y: 0}
+  m_ConnectedAnchor: {x: -0, y: 0}
   m_UseConnectedAnchor: 1
   m_UseMotor: 0
   m_Motor:
@@ -2294,7 +2343,7 @@ Rigidbody2D:
   m_Simulated: 1
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
-  m_Mass: 1
+  m_Mass: 0.0001
   m_LinearDamping: 2
   m_AngularDamping: 2
   m_GravityScale: 0
