@@ -130,7 +130,8 @@ public class FishingPhysics2D : MonoBehaviour
 	// 竿梢“真实”速度（由 Seg3 刚体在 FixedUpdate 计算）
 	Vector2 tipVelFixed;
     // 鼠标决定的当前抛投方向（相对竿梢）和左右符号
-    Vector2 castDirCached = Vector2.right;
+    Vector2 castDirCached = Vector2.right;     // 鼠标方向（归一化，带Y）
+    Vector2 castDirHorizCached = Vector2.right; // 仅水平前向（左/右）
     float sideSignCached = 1f; // 右:+1，左:-1
 
     // Charging 阶段围绕 RodRoot 的后仰控制（避免 360° 抖动）
@@ -324,7 +325,7 @@ public class FishingPhysics2D : MonoBehaviour
             ApplySeg1BackAngle(currentBackAngleDeg);
         }
 
-        if (apex || whipT >= whipPulse) ReleaseNow(castDirCached, vTip);
+        if (apex || whipT >= whipPulse) ReleaseNow(castDirHorizCached, vTip);
 	}
 
     void ReleaseNow(Vector2 castDir, Vector2 vTip)
@@ -337,7 +338,9 @@ public class FishingPhysics2D : MonoBehaviour
 		bobber.gravityScale = flightGravity; // 抛物线感觉
 
 		// 初速度：竿梢切向 + 解析前向
-		Vector2 vInit = vTip * Mathf.Max(0f, tipBoost) + castDir * v0 * Mathf.Max(0f, extraBoost);
+        // 解析前向分量仅取水平向（避免误把朝上的鼠标抬高导致“总是偏左/右”）
+        Vector2 castDirHoriz = castDirHorizCached; // 使用缓存的水平前向
+        Vector2 vInit = vTip * Mathf.Max(0f, tipBoost) + castDirHoriz * v0 * Mathf.Max(0f, extraBoost);
 		bobber.linearVelocity = vInit;
 
 		// 飞行：严格“最大长度上限”，略加松弛
@@ -613,8 +616,12 @@ void RestoreRodPoseOnly()
     {
         Vector2 origin = rodTip ? (Vector2)rodTip.position : (Vector2)transform.position;
         Vector2 mouse = Camera.main ? (Vector2)Camera.main.ScreenToWorldPoint(Input.mousePosition) : origin + Vector2.right;
-        castDirCached = (mouse - origin).sqrMagnitude > 1e-6f ? (mouse - origin).normalized : Vector2.right;
-        sideSignCached = Mathf.Sign(Mathf.Abs(castDirCached.x) < 1e-4f ? 1f : castDirCached.x);
+        Vector2 delta = (mouse - origin);
+        castDirCached = delta.sqrMagnitude > 1e-6f ? delta.normalized : Vector2.right;
+        // 水平向量：只取 X 分量符号，避免非常小的X被Y主导
+        float sx = Mathf.Sign(Mathf.Abs(delta.x) < 1e-4f ? 1f : delta.x);
+        castDirHorizCached = new Vector2(sx, 0f);
+        sideSignCached = sx; // 右:+1，左:-1
     }
     // 围绕 RodRoot 旋转（不再直接旋转 seg1）
     void ApplySeg1BackAngle(float backDeg)
