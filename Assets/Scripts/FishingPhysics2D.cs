@@ -65,6 +65,7 @@ public class FishingPhysics2D : MonoBehaviour
     public float whipMotorSpeed = 1100f;
     public float whipPulse = 0.14f;
     public bool releaseAtForwardApex = true;
+    [Tooltip("马达使用镜像甩规则（右后仰→向左甩，左后仰→向右甩）")] public bool motorMirror = true;
     [Header("Whip Animation（根节点动画）")]
     [Tooltip("Whip 阶段是否同时动画 RodRoot 角度")] public bool animateRodRootInWhip = true;
     [Tooltip("Whip 阶段的目标前倾角（度）")] public float forwardLeanDeg = 18f;
@@ -673,12 +674,20 @@ void RestoreRodPoseOnly()
 	void PulseHingeTowardMouse()
 	{
 		if (!hinge1 || !seg1 || !rodTip) return;
-        // 使用镜像甩逻辑：前甩方向为“与鼠标相反的水平向”
-        float side = sideSign; // 右=+1，左=-1（已在 UpdateCastDir() 更新）
-        Vector2 releaseDir = new Vector2(-side, 0f);
-
-        Vector2 axis = ((Vector2)rodTip.position - (Vector2)seg1.position).normalized;
-        float sign = Mathf.Sign(Vector2.SignedAngle(axis, releaseDir));
+        float side = sideSign; // 右=+1，左=-1
+        float sign;
+        if (motorMirror)
+        {
+            // 直接用镜像规则：右→负转速，左→正转速（若方向反了，只需改 motorMirror=false）
+            sign = -side;
+        }
+        else
+        {
+            // 备用：根据轴与目标方向的夹角确定符号
+            Vector2 releaseDir = new Vector2(-side, 0f);
+            Vector2 axis = ((Vector2)rodTip.position - (Vector2)seg1.position).normalized;
+            sign = Mathf.Sign(Vector2.SignedAngle(axis, releaseDir));
+        }
 		var m = hinge1.motor;
 		m.motorSpeed = sign * Mathf.Abs(whipMotorSpeed);
 		m.maxMotorTorque = 1e6f;
