@@ -19,6 +19,9 @@ using System.Runtime.ConstrainedExecution;
 [RequireComponent(typeof(LineRenderer))]
 public class FishingPhysics2D : MonoBehaviour
 {
+    // Small epsilon for float comparisons; large sentinel rope length
+    const float EPS = 1e-6f;
+    const float HUGE_ROPE = 1e6f;
 	[Header("Events（外部可挂回调）")]
 	public FishingEvents events = new FishingEvents();
 
@@ -356,7 +359,7 @@ public class FishingPhysics2D : MonoBehaviour
 		// 用 FixedUpdate 缓存的真实竿梢速度；前甩目标方向=鼠标相反的水平向
 		Vector2 vTip = tipVelFixed;
 		Vector2 releaseDir = (sideSign > 0) ? Vector2.left : Vector2.right;
-		float tipFwd = (vTip.sqrMagnitude < 1e-6f) ? -999f : Vector2.Dot(vTip.normalized, releaseDir);
+        float tipFwd = (vTip.sqrMagnitude < EPS) ? -999f : Vector2.Dot(vTip.normalized, releaseDir);
 		bool apex = releaseAtForwardApex && tipFwdPrev > -998f && tipFwdPrev > tipFwd; // 前向速度开始回落
 		tipFwdPrev = tipFwd;
 
@@ -861,9 +864,9 @@ public class FishingPhysics2D : MonoBehaviour
 		Vector2 axis = ((Vector2)rodTip.position - (Vector2)seg1.position).normalized;
 		float sign = Mathf.Sign(Vector2.SignedAngle(axis, releaseDir));
 
-		var m = hinge1.motor;
-		m.motorSpeed = sign * Mathf.Abs(whipMotorSpeed);
-		m.maxMotorTorque = 1e6f;
+        var m = hinge1.motor;
+        m.motorSpeed = sign * Mathf.Abs(whipMotorSpeed);
+        m.maxMotorTorque = HUGE_ROPE; // big torque sentinel
 		hinge1.motor = m;
 		hinge1.useMotor = true;
 		Invoke(nameof(StopHingeMotor), Mathf.Clamp(whipPulse * 1.1f, 0.02f, 0.2f));
