@@ -104,6 +104,11 @@ public class FishingPhysics2D : MonoBehaviour
     [Tooltip("相对释放瞬间角度，允许后仰的角度上限（度）")] [Range(0f, 90f)] public float holdRodBackLimit = 40f;
     [Tooltip("相对释放瞬间角度，允许前倾的角度上限（度）")] [Range(0f, 90f)] public float holdRodForwardLimit = 25f;
 
+    [Header("Rod Limits（根节角度限制）")]
+    [Tooltip("是否启用根节的角度限制，防止 360° 旋转")] public bool enforceRodLimits = true;
+    [Tooltip("根节最小角（度，负为向后）")] public float rodMinAngleDeg = -70f;
+    [Tooltip("根节最大角（度，正为向前）")] public float rodMaxAngleDeg = 35f;
+
 	// ------------------------- 内部状态 -------------------------
 	enum Phase { Idle, Charging, Whip, Flight, Landed, Reeling }
     Phase phase = Phase.Idle;
@@ -250,9 +255,13 @@ public class FishingPhysics2D : MonoBehaviour
         // 禁用根节马达，Charging 仅用确定性后仰角呈现
         if (hinge1) hinge1.useMotor = false;
 
-        // 目标后仰角（负角度表示向后），使用 SmoothDampAngle 消除 360° 跳变
+        // 目标后仰角（负角度表示向后），使用 SmoothDampAngle 消除 360° 跳变，并且进行硬限制
         float t = Mathf.Pow(Mathf.Clamp01(charge01), Mathf.Max(0.0001f, powerCurve));
         float targetDeg = -Mathf.Abs(maxBackAngleDeg) * t;
+        if (enforceRodLimits)
+        {
+            targetDeg = Mathf.Clamp(targetDeg, rodMinAngleDeg, rodMaxAngleDeg);
+        }
         currentBackAngleDeg = Mathf.SmoothDampAngle(currentBackAngleDeg, targetDeg, ref rotSmoothVelDeg, Mathf.Max(0.0001f, rotationSmoothTime));
         ApplySeg1BackAngle(currentBackAngleDeg);
 	}
@@ -559,6 +568,11 @@ void RestoreRodPoseOnly()
     void ApplySeg1BackAngle(float backDeg)
     {
         if (!seg1) return;
+        // 硬限制角度范围（即使外部参数失控也不越界）
+        if (enforceRodLimits)
+            backDeg = Mathf.Clamp(backDeg, rodMinAngleDeg, rodMaxAngleDeg);
+
+        // 保持世界位姿中的局部旋转基于 home，加角度不累加
         var oldType = seg1.bodyType;
         seg1.bodyType = RigidbodyType2D.Kinematic; // 防止物理帧对 Transform 覆写
         seg1.transform.localRotation = seg1Home.rot * Quaternion.Euler(0f, 0f, backDeg);
@@ -576,11 +590,11 @@ void RestoreRodPoseOnly()
         hingePrevMotor = hinge1.motor;
 
         // 以释放瞬间角度为中心，设置窄窗口的角度限制
-        float baseAngle = hinge1.jointAngle; // 当前角度（度）
+        float baseAngle = Mathf.Clamp(hinge1.jointAngle, rodMinAngleDeg, rodMaxAngleDeg); // 当前角度（度）
         var limits = new JointAngleLimits2D
         {
-            min = baseAngle - Mathf.Abs(holdRodBackLimit),
-            max = baseAngle + Mathf.Abs(holdRodForwardLimit)
+            min = enforceRodLimits ? rodMinAngleDeg : baseAngle - Mathf.Abs(holdRodBackLimit),
+            max = enforceRodLimits ? rodMaxAngleDeg : baseAngle + Mathf.Abs(holdRodForwardLimit)
         };
 
         hinge1.useMotor = false; // 停止进一步驱动，避免与限制冲突
