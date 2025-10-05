@@ -83,6 +83,9 @@ public class FishingPhysics2D : MonoBehaviour
     [Tooltip("连续多少帧“已绷紧”就直接落水")][Range(1, 8)] public int tautFramesToLand = 2;
     [Tooltip("离屏外溢容差（0~0.2）")][Range(0f, 0.2f)] public float offscreenMargin = 0.05f;
     [Tooltip("只在命中水面时判定落水（演示需求：抛进水里就结束）")] public bool landOnlyOnWater = true;
+    [Header("Water Landing（混合逻辑）")]
+    [Tooltip("命中水后需要停留的最短时间，避免“刚碰水就落”")] public float waterSettleDelay = 0.2f;
+    [Tooltip("水中锁长的速度阈值，低于则可落")] public float waterLockSpeed = 0.8f;
 
     [Header("Line Renderer")]
     [Min(2)] public int lineSegments = 20;
@@ -150,6 +153,9 @@ public class FishingPhysics2D : MonoBehaviour
     float maxCastDistance;  // 历史最远落水长度
     float lastCastLen;      // 上一次落水长度
     float lastReleaseSpeed; // 上一次释放初速
+    // 水命中计时
+    bool sawWater;          // 本次飞行是否已首次命中水
+    float waterHitT;        // 首次命中水的相对时间（castTimer）
 
     float[] speedHistory;   // 每帧 tip/bobber 速度采样
     float[] distHistory;    // 每帧 tip-bobber 距离采样
@@ -322,7 +328,7 @@ public class FishingPhysics2D : MonoBehaviour
 		}
 
         ChangePhase(Phase.Flight);
-		castTimer = 0f; tautFrames = 0;
+        castTimer = 0f; tautFrames = 0; sawWater = false; waterHitT = 0f;
 
         lastReleaseSpeed = vInit.magnitude;
         if (events?.onRelease != null) events.onRelease.Invoke();
@@ -340,31 +346,37 @@ public class FishingPhysics2D : MonoBehaviour
         // 视口外溢：如果仅水面落水关闭，则强制落水；否则放行由水面判定
         if (!landOnlyOnWater && IsOffscreen(bobber.position, offscreenMargin)) { ForceLand(); return; }
 
-        // 立即水面落水：若启用“仅水面落水”，一旦命中水层立刻锁长
+        // 混合逻辑：记录首次命中水的时刻，但不立即落水
         bool inWaterNow = Physics2D.OverlapPoint(bobber.position, waterMask) != null;
-        if (landOnlyOnWater && inWaterNow) { ForceLand(); return; }
+        if (inWaterNow && !sawWater) { sawWater = true; waterHitT = castTimer; }
 
 		float tipTo = Vector2.Distance(rodTip.position, bobber.position);
 		bool tight = tipTo >= rope.distance - 0.01f;
 		tautFrames = tight ? (tautFrames + 1) : 0;
 
-        // 如果是只在水面落水，则忽略“拉紧落水”规则
-        if (!landOnlyOnWater)
-        {
-            if (tautFrames >= Mathf.Max(1, tautFramesToLand) && castTimer >= landTimeout * 0.4f) { ForceLand(); return; }
-        }
+        // 如果不是“只在水面落水”，可用拉紧若干帧的早落水
+        if (!landOnlyOnWater && tautFrames >= Mathf.Max(1, tautFramesToLand) && castTimer >= landTimeout * 0.4f) { ForceLand(); return; }
 
-        // 到时后落水：
-        // - landOnlyOnWater=true：命中水面才落
-        // - 否则：命中水面，或已绷紧且速度回向竿梢
-		if (castTimer >= landTimeout)
-		{
-            bool inWater = inWaterNow;
-			Vector2 toTip = (Vector2)rodTip.position - bobber.position;
-			bool inward = Vector2.Dot(toTip, bobber.linearVelocity) > 0f
-						  || bobber.linearVelocity.sqrMagnitude < 0.0004f;
-            if ((landOnlyOnWater && inWater) || (!landOnlyOnWater && (inWater || (tight && inward)))) ForceLand();
-		}
+        // 落水条件（混合）：
+        // - landOnlyOnWater=true：需要命中水，且满足（到时 or 入水后延迟达到，且[已绷紧 或 速度慢 或 回向竿梢]）
+        // - landOnlyOnWater=false：原有条件即可
+        Vector2 toTip = (Vector2)rodTip.position - bobber.position;
+        bool inward = Vector2.Dot(toTip, bobber.linearVelocity) > 0f || bobber.linearVelocity.sqrMagnitude < 0.0004f;
+        bool slowInWater = bobber.linearVelocity.sqrMagnitude <= waterLockSpeed * waterLockSpeed;
+        bool waterDelayOk = sawWater && (castTimer - waterHitT) >= Mathf.Max(0f, waterSettleDelay);
+
+        if (landOnlyOnWater)
+        {
+            if (inWaterNow && (castTimer >= landTimeout || (waterDelayOk && (tight || inward || slowInWater))))
+            { ForceLand(); return; }
+        }
+        else
+        {
+            if (castTimer >= landTimeout)
+            {
+                if (inWaterNow || (tight && inward)) { ForceLand(); return; }
+            }
+        }
 	}
 
 	bool IsOffscreen(Vector3 worldPos, float margin)
