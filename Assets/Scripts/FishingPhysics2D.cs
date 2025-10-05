@@ -173,8 +173,8 @@ public class FishingPhysics2D : MonoBehaviour
 	// 竿梢“真实”速度（由 Seg3 刚体在 FixedUpdate 计算）
 	Vector2 tipVelFixed;
 	// 鼠标决定的当前抛投方向（相对竿梢）和左右符号（简化版）
-	Vector2 castDir = Vector2.right;  // 完整方向（含Y），用于点积判断
-	float sideSign = 1f;              // 水平符号：右=+1，左=-1，用于后仰/前甩与水平初速
+    Vector2 castDir = Vector2.right;      // 完整方向（含Y），用于点积判断
+    float mouseSideSign = 1f;             // 水平符号：右=+1，左=-1，用于后仰/前甩与水平初速
 
 	// Charging 阶段围绕 RodRoot 的后仰控制（避免 360° 抖动）
 	float currentBackAngleDeg;
@@ -211,7 +211,7 @@ public class FishingPhysics2D : MonoBehaviour
 	int histIndex;
 	GUIStyle hudStyle;
 
-	// ------------------------- 生命周期 -------------------------
+    // ========================= Unity Lifecycle =========================
 	void Awake()
 	{
 		lr = GetComponent<LineRenderer>();
@@ -271,7 +271,7 @@ public class FishingPhysics2D : MonoBehaviour
 		}
 	}
 
-	// --------------------------- 主循环 ---------------------------
+    // ========================= Update Loop =========================
 	void Update()
 	{
 		// 右键紧急复位（先彻底取消所有延迟/协程）
@@ -294,7 +294,7 @@ public class FishingPhysics2D : MonoBehaviour
 		Watchdog();
 	}
 
-	// --------------------------- 状态实现 ---------------------------
+    // ========================= State Machine Handlers =========================
 	void BeginCharging()
 	{
 		ChangePhase(Phase.Charging);
@@ -320,14 +320,14 @@ public class FishingPhysics2D : MonoBehaviour
 
 		// 依据鼠标方向确定“前/后”的符号（右为前→后仰为负；左为前→后仰为正）
 		// 依据统一缓存的鼠标方向与左右
-		float side = sideSign;
+        float side = mouseSideSign;
 
 		// 目标后仰角（按蓄力幅度）
 		// t = 蓄力幅度（0..1）
 		float t = Mathf.Pow(Mathf.Clamp01(charge01), Mathf.Max(0.0001f, powerCurve));
 
 		// 规则：点左边(side=-1) => 竿向左后仰(角度为+backAngleDeg)；点右边(side=+1) => 竿向右后仰(角度为-backAngleDeg)
-		float targetDeg = (sideSign < 0 ? +backAngleDeg : -backAngleDeg) * t;
+        float targetDeg = (mouseSideSign < 0 ? +backAngleDeg : -backAngleDeg) * t;
 
 		if (enforceRodLimits) targetDeg = Mathf.Clamp(targetDeg, rodMinAngleDeg, rodMaxAngleDeg);
 		currentBackAngleDeg = Mathf.SmoothDampAngle(currentBackAngleDeg, targetDeg, ref rotSmoothVelDeg, Mathf.Max(0.0001f, rotationSmoothTime));
@@ -354,11 +354,11 @@ public class FishingPhysics2D : MonoBehaviour
 		whipT += dt;
 		bobber.transform.localPosition = Vector3.zero;
 
-		float side = sideSign;
+        float side = mouseSideSign;
 
 		// 用 FixedUpdate 缓存的真实竿梢速度；前甩目标方向=鼠标相反的水平向
 		Vector2 vTip = tipVelFixed;
-		Vector2 releaseDir = (sideSign > 0) ? Vector2.left : Vector2.right;
+        Vector2 releaseDir = (mouseSideSign > 0) ? Vector2.left : Vector2.right;
         float tipFwd = (vTip.sqrMagnitude < EPS) ? -999f : Vector2.Dot(vTip.normalized, releaseDir);
 		bool apex = releaseAtForwardApex && tipFwdPrev > -998f && tipFwdPrev > tipFwd; // 前向速度开始回落
 		tipFwdPrev = tipFwd;
@@ -368,7 +368,7 @@ public class FishingPhysics2D : MonoBehaviour
 		{
 			float p = Mathf.Clamp01(whipT / Mathf.Max(0.02f, whipPulse));
 			float targetDeg = Mathf.Lerp(currentBackAngleDeg,
-										 sideSign * Mathf.Abs(forwardAngleDeg),
+                                         mouseSideSign * Mathf.Abs(forwardAngleDeg),
 										 p);
 			if (enforceRodLimits) targetDeg = Mathf.Clamp(targetDeg, rodMinAngleDeg, rodMaxAngleDeg);
 			currentBackAngleDeg = Mathf.SmoothDampAngle(currentBackAngleDeg, targetDeg, ref rotSmoothVelDeg, Mathf.Max(0.0001f, rotationSmoothTime));
@@ -660,7 +660,7 @@ public class FishingPhysics2D : MonoBehaviour
 		}
 	}
 
-	// --------------------------- 复位 / Home Pose ---------------------------
+    // ========================= Reset / Home Pose =========================
 	void CaptureHome()
 	{
 		if (homeCaptured || seg1 == null || seg2 == null || seg3 == null || rodTip == null || bobber == null) return;
@@ -799,7 +799,7 @@ public class FishingPhysics2D : MonoBehaviour
 		Vector2 origin = rodTip ? (Vector2)rodTip.position : (Vector2)transform.position;
 		Vector2 mouse = Camera.main ? (Vector2)Camera.main.ScreenToWorldPoint(Input.mousePosition) : origin + Vector2.right;
 		Vector2 delta = (mouse - origin);
-		sideSign = (delta.x >= 0f) ? 1f : -1f;
+        mouseSideSign = (delta.x >= 0f) ? 1f : -1f;
 	}
 	// 围绕 RodRoot 旋转
 	void ApplyRootBackAngle(float backDeg)
@@ -852,13 +852,13 @@ public class FishingPhysics2D : MonoBehaviour
 	}
 
 
-	// --------------------------- 实用小块 ---------------------------
+    // ========================= Motor / Helpers =========================
 	void PulseHingeTowardMouse()
 	{
 		if (!hinge1 || !seg1 || !rodTip) return;
 
 		// 镜像目标方向 = releaseDir
-		Vector2 releaseDir = (sideSign > 0) ? Vector2.left : Vector2.right;
+        Vector2 releaseDir = (mouseSideSign > 0) ? Vector2.left : Vector2.right;
 
 		// 推荐：用几何夹角求转向符号（比纯 -side 更不易反）
 		Vector2 axis = ((Vector2)rodTip.position - (Vector2)seg1.position).normalized;
@@ -886,7 +886,7 @@ public class FishingPhysics2D : MonoBehaviour
 		return L * k / denom;
 	}
 
-	// --------------------------- 视觉线 ---------------------------
+    // ========================= Rendering (LineRenderer) =========================
 	void ConfigureLine()
 	{
 		float w = 1f / Mathf.Max(1, pixelsPerUnit);
@@ -918,7 +918,7 @@ public class FishingPhysics2D : MonoBehaviour
 		lr.enabled = !(phase == Phase.Idle || phase == Phase.Charging);
 	}
 
-	// --------------------------- Safety ---------------------------
+    // ========================= Safety =========================
 	void Watchdog()
 	{
 		if (phase == Phase.Idle || !rodTip || !bobber) return;
@@ -930,7 +930,7 @@ public class FishingPhysics2D : MonoBehaviour
 		}
 	}
 
-	// --------------------------- UI 渐隐 ---------------------------
+    // ========================= UI Fade =========================
 	void StartUiFadeOut() { uiFading = chargeSlider != null; uiFadeT = 0f; }
 	void TickUiFade(float dt)
 	{
@@ -942,7 +942,7 @@ public class FishingPhysics2D : MonoBehaviour
 		if (uiFadeT >= dur) { chargeSlider.value = 0; chargeSlider.gameObject.SetActive(false); uiFading = false; }
 	}
 
-	// --------------------------- Phase/Debug/HUD ---------------------------
+    // ========================= Phase / Debug HUD =========================
 	void ChangePhase(Phase next)
 	{
 		if (phase == next) return;
