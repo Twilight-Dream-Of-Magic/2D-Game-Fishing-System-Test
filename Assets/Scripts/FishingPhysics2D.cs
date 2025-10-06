@@ -201,14 +201,14 @@ public class FishingPhysics2D : MonoBehaviour
 	JointAngleLimits2D hingePrevLimits;
 	JointMotor2D hingePrevMotor;
 
-	// Debug 运行统计与历史
+    // Debug 运行统计与历史
 	int castCount;          // 总抛次数
 	float maxCastDistance;  // 历史最远落水长度
     float lastLockedLen;      // 上一次落水长度
 	float lastReleaseSpeed; // 上一次释放初速
 							// 水命中计时
-	bool sawWater;          // 本次飞行是否已首次命中水
-	float waterHitT;        // 首次命中水的相对时间（castTimer）
+    bool sawWater;          // 本次飞行是否已首次命中水
+    float waterHitT;        // 首次命中水的相对时间（flightElapsed）
 
 	float[] speedHistory;   // 每帧 tip/bobber 速度采样
 	float[] distHistory;    // 每帧 tip-bobber 距离采样
@@ -350,7 +350,7 @@ public class FishingPhysics2D : MonoBehaviour
     // BeginWhip：计算 plannedLen —— 只按蓄力做线性映射（严格 0..1）
 	void BeginWhip()
 	{
-		ChangePhase(Phase.Whip);
+        ChangePhase(Phase.Whip);
         whipElapsed = 0f; tipForwardnessPrev = -999f;
 
         // 线性：最小~最大之间的 charge 百分比
@@ -362,9 +362,9 @@ public class FishingPhysics2D : MonoBehaviour
         Debug.Log($"[Fishing] WHIP charge={chargeProgress01:F2} lenPlan={plannedRopeLen:F2}", this);
 	}
 
-	void TickWhip(float dt)
+    void TickWhip(float dt)
 	{
-        whipT += dt;
+        whipElapsed += dt;
 		bobber.transform.localPosition = Vector3.zero;
 
         float side = mouseSideSign;
@@ -373,13 +373,13 @@ public class FishingPhysics2D : MonoBehaviour
         Vector2 tipVelocity = tipVelocityFixed;
         Vector2 releaseDir = (mouseSideSign > 0) ? Vector2.left : Vector2.right;
         float tipForwardness = (tipVelocity.sqrMagnitude < EPS) ? -999f : Vector2.Dot(tipVelocity.normalized, releaseDir);
-        bool apex = releaseAtForwardApex && tipFwdPrev > -998f && tipFwdPrev > tipForwardness; // 前向速度开始回落
-        tipFwdPrev = tipForwardness;
+        bool apex = releaseAtForwardApex && tipForwardnessPrev > -998f && tipForwardnessPrev > tipForwardness; // 前向速度开始回落
+        tipForwardnessPrev = tipForwardness;
 
 		// 根节点前倾动画：将 backAngle 朝前倾过渡（与鼠标方向一致）
 		if (animateRodRootInWhip && RodRoot)
 		{
-            float p = Mathf.Clamp01(whipT / Mathf.Max(0.02f, whipPulse));
+            float p = Mathf.Clamp01(whipElapsed / Mathf.Max(0.02f, whipPulse));
 			float targetDeg = Mathf.Lerp(currentBackAngleDeg,
                                          mouseSideSign * Mathf.Abs(forwardAngleDeg),
 										 p);
@@ -388,7 +388,7 @@ public class FishingPhysics2D : MonoBehaviour
 			ApplyRootBackAngle(currentBackAngleDeg);
 		}
 
-        if (apex || whipT >= whipPulse) ReleaseNow(releaseDir, tipVelocity);
+        if (apex || whipElapsed >= whipPulse) ReleaseNow(releaseDir, tipVelocity);
 	}
 
     void ReleaseNow(Vector2 releaseDir, Vector2 tipVelocity)
@@ -410,8 +410,8 @@ public class FishingPhysics2D : MonoBehaviour
         castMaxLen = Mathf.Clamp(plannedRopeLen, ropeMinLen, ropeMaxLen);
 		SetRopeForRelease();
 
-		ChangePhase(Phase.Flight);
-        castTimer = 0f; tautFrames = 0; sawWater = false; waterHitT = 0f;
+        ChangePhase(Phase.Flight);
+        flightElapsed = 0f; tautFrameCount = 0; sawWater = false; waterHitT = 0f;
 
 		lastReleaseSpeed = vInit.magnitude;
 		if (events?.onRelease != null) events.onRelease.Invoke();
@@ -432,7 +432,7 @@ public class FishingPhysics2D : MonoBehaviour
 			rope.distance = (newLen > rope.distance) ? newLen : rope.distance; // 防回退
 		}
 
-		castTimer += dt;
+        flightElapsed += dt;
 		if (!bobber || !rope || !rodTip) return;
 
 		// 2) 离屏保护（只保留一套行为：空中锁）
@@ -444,26 +444,26 @@ public class FishingPhysics2D : MonoBehaviour
 
 		// 3) 水体命中仅做记录（放线阶段不触发落水）
 		bool inWaterNow = Physics2D.OverlapPoint(bobber.position, waterMask) != null;
-		if (inWaterNow && !sawWater) { sawWater = true; waterHitT = castTimer; }
+        if (inWaterNow && !sawWater) { sawWater = true; waterHitT = flightElapsed; }
 
 		// 4) 基础量
-		float cap = CurrentMaxCap;
+        float currentCapLen = CurrentMaxCap;
 		float tipTo = Vector2.Distance(rodTip.position, bobber.position);
-		bool tight = tipTo >= rope.distance - 0.01f;
-		tautFrames = tight ? (tautFrames + 1) : 0;
+        bool tight = tipTo >= rope.distance - 0.01f;
+        tautFrameCount = tight ? (tautFrameCount + 1) : 0;
 
 		// 5) 硬封顶：distance 不得超过 cap
-		if (rope.maxDistanceOnly) rope.distance = Mathf.Min(rope.distance, cap);
+        if (rope.maxDistanceOnly) rope.distance = Mathf.Min(rope.distance, currentCapLen);
 
 		// 6) 兜底：即便关闭了 RopeSpoolOut，只要被拉紧也把 distance 往 cap 推
-		if (!ropeSpoolOut && rope.maxDistanceOnly && tight)
+        if (!ropeSpoolOut && rope.maxDistanceOnly && tight)
 		{
-			float slack = Mathf.Max(0f, ropeSlackRatio) * cap;
-			rope.distance = Mathf.Min(cap, Mathf.Max(rope.distance, tipTo + slack));
+            float slack = Mathf.Max(0f, ropeSlackRatio) * currentCapLen;
+            rope.distance = Mathf.Min(currentCapLen, Mathf.Max(rope.distance, tipTo + slack));
 		}
 
 		// 7) 放线进行中：给微重力并**跳过**一切落水逻辑
-		bool spoolingHard = rope.maxDistanceOnly && rope.distance < cap - 0.005f;
+        bool spoolingHard = rope.maxDistanceOnly && rope.distance < currentCapLen - 0.005f;
 		if (spoolingHard)
 		{
 			bobber.gravityScale = Mathf.Max(0f, microGravity);
@@ -473,24 +473,24 @@ public class FishingPhysics2D : MonoBehaviour
 		// 放线结束：恢复飞行重力（若未锁）
 		if (!airLocked) bobber.gravityScale = flightGravity;
 
-		// 8) 到达 cap：以真实距离判定并空中锁
-		bool nearCap = tipTo >= cap - capEps;
-		if (stopAtCapInAir && nearCap && castTimer >= ropeRequiredFlightTime)
+        // 8) 到达 cap：以真实距离判定并空中锁
+        bool nearCap = tipTo >= currentCapLen - capEps;
+        if (stopAtCapInAir && nearCap && flightElapsed >= ropeRequiredFlightTime)
 		{
 			AirLockAtCap();
 			return;
 		}
 
-		// 9) 允许“非水面早落水”才走这一支
-		if (!landOnlyOnWater && tautFrames >= Mathf.Max(1, tautFramesToLand) && castTimer >= ropeRequiredFlightTime)
+        // 9) 允许“非水面早落水”才走这一支
+        if (!landOnlyOnWater && tautFrameCount >= Mathf.Max(1, tautFramesToLand) && flightElapsed >= ropeRequiredFlightTime)
 		{
 			LockRopeAtCurrentAndWaterDamping(); // 老的“落入水/地”锁法
 			return;
 		}
 
 		// 10) 水面落水（稳定后判定）
-		Vector2 toTip = (Vector2)rodTip.position - bobber.position;
-		bool inward = Vector2.Dot(toTip, bobber.linearVelocity) > 0f || bobber.linearVelocity.sqrMagnitude < 0.0004f;
+        Vector2 vectorToTip = (Vector2)rodTip.position - bobber.position;
+        bool inward = Vector2.Dot(vectorToTip, bobber.linearVelocity) > 0f || bobber.linearVelocity.sqrMagnitude < 0.0004f;
 		bool slowInWater = bobber.linearVelocity.sqrMagnitude <= waterLockSpeed * waterLockSpeed;
 		if (ShouldForceLand(inWaterNow, tight, inward, slowInWater))
 		{
@@ -511,9 +511,9 @@ public class FishingPhysics2D : MonoBehaviour
 	{
 		if (!bobber || !rodTip) return;
 
-		float cap = CurrentMaxCap;
-		float tipTo = Vector2.Distance(rodTip.position, bobber.position);
-		float clamped = Mathf.Clamp(tipTo, ropeMinLen, cap);
+        float currentCapLen = CurrentMaxCap;
+        float tipTo = Vector2.Distance(rodTip.position, bobber.position);
+        float clamped = Mathf.Clamp(tipTo, ropeMinLen, currentCapLen);
 
 		// 固定在当前长度；视觉上仍能画线
 		if (rope)
@@ -532,7 +532,7 @@ public class FishingPhysics2D : MonoBehaviour
 
 		airLocked = true;
 		ChangePhase(Phase.Landed);          // 此时左键可开始收线
-		Debug.Log($"[Fishing] AIR-LOCK cap={cap:F2} tipTo={tipTo:F2}", this);
+        Debug.Log($"[Fishing] AIR-LOCK cap={currentCapLen:F2} tipTo={tipTo:F2}", this);
 	}
 
 
@@ -542,7 +542,7 @@ public class FishingPhysics2D : MonoBehaviour
 		// 落水后的实际长度 ∈ [min, 本次上限]
 		float clamped = Mathf.Clamp(cur, ropeMinLen, CurrentMaxCap);
 
-		Debug.Log($"[Fishing] LANDED raw={cur:F2} clamp={clamped:F2} cap={CurrentMaxCap:F2}", this);
+        Debug.Log($"[Fishing] LANDED raw={cur:F2} clamp={clamped:F2} cap={CurrentMaxCap:F2}", this);
 
 		if (rope)
 		{
@@ -557,7 +557,7 @@ public class FishingPhysics2D : MonoBehaviour
 
 		ChangePhase(Phase.Landed);
 		castCount++;
-		lastCastLen = cur;
+        lastLockedLen = cur;
 		maxCastDistance = Mathf.Max(maxCastDistance, cur);
 		if (events?.onLand != null) events.onLand.Invoke();
 		if (snapRodOnLand) RestoreRodPoseOnly();
@@ -566,7 +566,7 @@ public class FishingPhysics2D : MonoBehaviour
 
     void TryBeginReelFromFlight()
 	{
-		if (!Input.GetMouseButtonDown(0) || phase != Phase.Flight || rope == null || rodTip == null) return;
+        if (!Input.GetMouseButtonDown(0) || phase != Phase.Flight || rope == null || rodTip == null) return;
 
 		if (reelAnytime)
 		{
@@ -578,7 +578,7 @@ public class FishingPhysics2D : MonoBehaviour
 		}
 
 		// 原有逻辑：超时且已绷紧
-		if (castTimer < ropeRequiredFlightTime) return;
+        if (flightElapsed < ropeRequiredFlightTime) return;
 		float tipTo = Vector2.Distance(rodTip.position, bobber.position);
 		if (tipTo < rope.distance - 0.02f) return; // 未绷紧
 		LockRopeAtCurrentAndWaterDamping();
@@ -634,17 +634,17 @@ public class FishingPhysics2D : MonoBehaviour
 
     bool ShouldForceLand(bool inWaterNow, bool tight, bool inward, bool slowInWater)
 	{
-		bool timeout = castTimer >= ropeFlightTimeout;
+        bool timeout = flightElapsed >= ropeFlightTimeout;
 		if (landOnlyOnWater)
 		{
 			if (!inWaterNow) return false;
-			bool settleOk = sawWater && (castTimer - waterHitT) >= Mathf.Max(0f, waterSettleDelay);
+            bool settleOk = sawWater && (flightElapsed - waterHitT) >= Mathf.Max(0f, waterSettleDelay);
 			// 只在“绷紧或超时”并且水面稳定后才落水
 			return settleOk && (tight || timeout);
 		}
 		else
 		{
-			return (tight && castTimer >= ropeRequiredFlightTime) || timeout;
+            return (tight && flightElapsed >= ropeRequiredFlightTime) || timeout;
 		}
 	}
 
@@ -654,10 +654,10 @@ public class FishingPhysics2D : MonoBehaviour
 
 		if (rodTip && bobber)
 		{
-			Vector2 toTip = (Vector2)rodTip.position - bobber.position;
-			if (toTip.sqrMagnitude > 1e-6f) bobber.AddForce(toTip.normalized * reelForce, ForceMode2D.Force);
+            Vector2 vectorToTip2 = (Vector2)rodTip.position - bobber.position;
+            if (vectorToTip2.sqrMagnitude > 1e-6f) bobber.AddForce(vectorToTip2.normalized * reelForce, ForceMode2D.Force);
 
-			if (toTip.magnitude <= 0.12f || (rope && rope.distance <= 0.02f))
+            if (vectorToTip2.magnitude <= 0.12f || (rope && rope.distance <= 0.02f))
 			{
 				if (rope) { rope.enabled = false; rope.distance = 0f; }
 				AttachToTipKeepWorld();
@@ -732,9 +732,9 @@ public class FishingPhysics2D : MonoBehaviour
 		ResetHinge(hinge1); ResetHinge(hinge2); ResetHinge(hinge3);
 
 		// —— 基本标量清零 —— //
-		charge01 = 0f; castTimer = 0f; plannedLen = 0f;
-		uiFading = false; uiFadeT = 0f; whipT = 0f; tipFwdPrev = -999f; tautFrames = 0;
-		tipVelFixed = Vector2.zero;
+        chargeProgress01 = 0f; flightElapsed = 0f; plannedRopeLen = 0f;
+        uiFading = false; uiFadeElapsed = 0f; whipElapsed = 0f; tipForwardnessPrev = -999f; tautFrameCount = 0;
+        tipVelocityFixed = Vector2.zero;
 
 		castMaxLen = 0f;
 		airLocked = false;
@@ -959,15 +959,15 @@ public class FishingPhysics2D : MonoBehaviour
 
     #region UI Fade
     // ========================= UI Fade =========================
-	void StartUiFadeOut() { uiFading = chargeSlider != null; uiFadeT = 0f; }
+    void StartUiFadeOut() { uiFading = chargeSlider != null; uiFadeElapsed = 0f; }
 	void TickUiFade(float dt)
 	{
 		if (!uiFading || !chargeSlider) return;
-		const float dur = 0.35f;
-		uiFadeT += dt;
-		float k = 1f - Mathf.Clamp01(uiFadeT / dur);
-		chargeSlider.value = k * chargeSlider.value;
-		if (uiFadeT >= dur) { chargeSlider.value = 0; chargeSlider.gameObject.SetActive(false); uiFading = false; }
+        const float dur = 0.35f;
+        uiFadeElapsed += dt;
+        float k = 1f - Mathf.Clamp01(uiFadeElapsed / dur);
+        chargeSlider.value = k * chargeSlider.value;
+        if (uiFadeElapsed >= dur) { chargeSlider.value = 0; chargeSlider.gameObject.SetActive(false); uiFading = false; }
 	}
 
     #endregion
@@ -996,19 +996,19 @@ public class FishingPhysics2D : MonoBehaviour
 
 		// 历史曲线
 		EnsureHistoryBuffers();
-		float tipSpeed = tipVelFixed.magnitude;
+        float tipSpeed = tipVelocityFixed.magnitude;
 		float bobSpeed = (bobber ? bobber.linearVelocity.magnitude : 0f);
 		float dist = (rodTip && bobber) ? Vector2.Distance(rodTip.position, bobber.position) : 0f;
-		AppendHistory(Mathf.Max(tipSpeed, bobSpeed), dist);
+        AppendHistory(Mathf.Max(tipSpeed, bobSpeed), dist);
 	}
 
 	void EnsureHistoryBuffers()
 	{
-		int cap = Mathf.Clamp(historyCapacity, 60, 2048);
-		if (speedHistory == null || speedHistory.Length != cap)
+        int capCount = Mathf.Clamp(historyCapacity, 60, 2048);
+        if (speedHistory == null || speedHistory.Length != capCount)
 		{
-			speedHistory = new float[cap];
-			distHistory = new float[cap];
+            speedHistory = new float[capCount];
+            distHistory = new float[capCount];
 			histIndex = 0;
 		}
 		if (hudStyle == null)
@@ -1022,10 +1022,10 @@ public class FishingPhysics2D : MonoBehaviour
 	void AppendHistory(float speed, float distance)
 	{
 		if (speedHistory == null) return;
-		int cap = speedHistory.Length;
-		speedHistory[histIndex] = speed;
-		distHistory[histIndex] = distance;
-		histIndex = (histIndex + 1) % cap;
+        int capLen = speedHistory.Length;
+        speedHistory[histIndex] = speed;
+        distHistory[histIndex] = distance;
+        histIndex = (histIndex + 1) % capLen;
 	}
 
 	void OnGUI()
@@ -1034,7 +1034,7 @@ public class FishingPhysics2D : MonoBehaviour
 		const float pad = 8f;
 		float y = pad;
 		string p = phase.ToString();
-		string txt = $"Phase: {p}\nCasts: {castCount}  MaxLen: {maxCastDistance:F2}\nRelease v: {lastReleaseSpeed:F2}\nTip v: {tipVelFixed.magnitude:F2}\nDist: {(rodTip && bobber ? Vector2.Distance(rodTip.position, bobber.position) : 0f):F2}\nReelAny: {reelAnytime} HoldFwd: {holdRodForward}";
+        string txt = $"Phase: {p}\nCasts: {castCount}  MaxLen: {maxCastDistance:F2}\nRelease v: {lastReleaseSpeed:F2}\nTip v: {tipVelocityFixed.magnitude:F2}\nDist: {(rodTip && bobber ? Vector2.Distance(rodTip.position, bobber.position) : 0f):F2}\nReelAny: {reelAnytime} HoldFwd: {holdRodForward}";
 		Vector2 size = hudStyle.CalcSize(new GUIContent(txt));
 		GUI.color = new Color(0, 0, 0, 0.6f);
 		GUI.Box(new Rect(pad, y, size.x + 2 * pad, size.y + 2 * pad), GUIContent.none);
