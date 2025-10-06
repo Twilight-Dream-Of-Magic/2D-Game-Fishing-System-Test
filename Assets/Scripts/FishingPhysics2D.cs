@@ -19,6 +19,7 @@ using System.Runtime.ConstrainedExecution;
 [RequireComponent(typeof(LineRenderer))]
 public class FishingPhysics2D : MonoBehaviour
 {
+    #region Inspector & Config
     // Small epsilon for float comparisons; large sentinel rope length
     const float EPS = 1e-6f;
     const float HUGE_ROPE = 1e6f;
@@ -127,7 +128,7 @@ public class FishingPhysics2D : MonoBehaviour
 	[Tooltip("根节最小角（度，负为向后）")] public float rodMinAngleDeg = -60f;
 	[Tooltip("根节最大角（度，正为向前）")] public float rodMaxAngleDeg = 60f;
 
-	[Header("Flight Gravity")]
+    [Header("Flight Gravity")]
 	[Tooltip("飞行期的重力系数（顶视角 0.10~0.30）")]
 	public float flightGravity = 0.18f;
 
@@ -139,7 +140,7 @@ public class FishingPhysics2D : MonoBehaviour
 	[Tooltip("放线期间使用的微重力（不影响放线逻辑）")]
 	public float microGravity = 0.03f;
 
-	bool airLocked;   // 空中锁定后免疫一切外力
+    bool airLocked;   // 空中锁定后免疫一切外力
 
 	[Header("Charge Limit")]
 	[Tooltip("把蓄力条映射为‘本次抛投的最大线长上限’")]
@@ -159,7 +160,10 @@ public class FishingPhysics2D : MonoBehaviour
 
 
 
-	// ------------------------- 内部状态 -------------------------
+    #endregion
+
+    #region Runtime State
+    // ------------------------- 内部状态 -------------------------
 	public enum Phase { Idle, Charging, Whip, Flight, Landed, Reeling }
 	Phase phase = Phase.Idle;
 	PhaseMachine fsm = new PhaseMachine();
@@ -211,6 +215,9 @@ public class FishingPhysics2D : MonoBehaviour
 	int histIndex;
 	GUIStyle hudStyle;
 
+    #endregion
+
+    #region Unity Lifecycle
     // ========================= Unity Lifecycle =========================
 	void Awake()
 	{
@@ -260,7 +267,7 @@ public class FishingPhysics2D : MonoBehaviour
 		if (lr) ConfigureLine();
 	}
 
-	// 物理步里**直接**用刚体求竿梢速度（旋转→切向速度）
+    // 物理步里**直接**用刚体求竿梢速度（旋转→切向速度）
 	void FixedUpdate()
 	{
 		if (seg3 && rodTip)
@@ -271,6 +278,9 @@ public class FishingPhysics2D : MonoBehaviour
 		}
 	}
 
+    #endregion
+
+    #region Update Loop
     // ========================= Update Loop =========================
 	void Update()
 	{
@@ -294,6 +304,9 @@ public class FishingPhysics2D : MonoBehaviour
 		Watchdog();
 	}
 
+    #endregion
+
+    #region State Machine Handlers
     // ========================= State Machine Handlers =========================
 	void BeginCharging()
 	{
@@ -334,7 +347,7 @@ public class FishingPhysics2D : MonoBehaviour
 		ApplyRootBackAngle(currentBackAngleDeg);
 	}
 
-	// BeginWhip：计算 plannedLen —— 只按蓄力做线性映射（严格 0..1）
+    // BeginWhip：计算 plannedLen —— 只按蓄力做线性映射（严格 0..1）
 	void BeginWhip()
 	{
 		ChangePhase(Phase.Whip);
@@ -408,7 +421,7 @@ public class FishingPhysics2D : MonoBehaviour
 		if (holdRodForward) HoldRodForwardTemporarily();
 	}
 
-	void TickFlight(float dt)
+    void TickFlight(float dt)
 	{
 		// 1) 放线插值推进（视觉平滑）
 		if (ropeSpoolOut && rope && rope.maxDistanceOnly)
@@ -487,14 +500,14 @@ public class FishingPhysics2D : MonoBehaviour
 	}
 
 
-	bool IsOffscreen(Vector3 worldPos, float margin)
+    bool IsOffscreen(Vector3 worldPos, float margin)
 	{
 		if (!Camera.main) return false;
 		var v = Camera.main.WorldToViewportPoint(worldPos);
 		return v.x < -margin || v.x > 1f + margin || v.y < -margin || v.y > 1f + margin;
 	}
 
-	void AirLockAtCap()
+    void AirLockAtCap()
 	{
 		if (!bobber || !rodTip) return;
 
@@ -523,7 +536,7 @@ public class FishingPhysics2D : MonoBehaviour
 	}
 
 
-	void LockRopeAtCurrentAndWaterDamping()
+    void LockRopeAtCurrentAndWaterDamping()
 	{
 		float cur = Vector2.Distance(rodTip.position, bobber.position);
 		// 落水后的实际长度 ∈ [min, 本次上限]
@@ -551,7 +564,7 @@ public class FishingPhysics2D : MonoBehaviour
 		Debug.Log($"[Fishing] LANDED lockLen={cur:F2}", this);
 	}
 
-	void TryBeginReelFromFlight()
+    void TryBeginReelFromFlight()
 	{
 		if (!Input.GetMouseButtonDown(0) || phase != Phase.Flight || rope == null || rodTip == null) return;
 
@@ -573,7 +586,7 @@ public class FishingPhysics2D : MonoBehaviour
 		Debug.Log("[Fishing] Begin reel from Flight (tight & timeout)", this);
 	}
 
-	void BeginReel()
+    void BeginReel()
 	{
 		if (airLocked)
 		{
@@ -597,7 +610,7 @@ public class FishingPhysics2D : MonoBehaviour
 	}
 
 	// 统一设置：释放时线状态（使用精简参数）
-	void SetRopeForRelease()
+    void SetRopeForRelease()
 	{
 		if (!rope) return;
 		rope.enabled = true;
@@ -617,9 +630,9 @@ public class FishingPhysics2D : MonoBehaviour
 
 	// 仅水面落水的判断：删除“到时就落”，改为“入水后稳定 + (绷紧/变慢/回向)”才落
 
-	bool IsSpooling() => ropeSpoolOut && rope && rope.maxDistanceOnly && rope.distance < ropeTargetLen - 0.01f;
+    bool IsSpooling() => ropeSpoolOut && rope && rope.maxDistanceOnly && rope.distance < ropeTargetLen - 0.01f;
 
-	bool ShouldForceLand(bool inWaterNow, bool tight, bool inward, bool slowInWater)
+    bool ShouldForceLand(bool inWaterNow, bool tight, bool inward, bool slowInWater)
 	{
 		bool timeout = castTimer >= ropeFlightTimeout;
 		if (landOnlyOnWater)
@@ -635,7 +648,7 @@ public class FishingPhysics2D : MonoBehaviour
 		}
 	}
 
-	void TickReeling(float dt)
+    void TickReeling(float dt)
 	{
 		if (rope) rope.distance = Mathf.Max(0f, rope.distance - Mathf.Max(0f, reelRate) * dt);
 
@@ -660,6 +673,9 @@ public class FishingPhysics2D : MonoBehaviour
 		}
 	}
 
+    #endregion
+
+    #region Reset / Home Pose
     // ========================= Reset / Home Pose =========================
 	void CaptureHome()
 	{
@@ -764,7 +780,7 @@ public class FishingPhysics2D : MonoBehaviour
 		Debug.Log("[Fishing] ResetToIdle", this);
 	}
 
-	// --------------------------- 附着/解绑 ---------------------------
+    // --------------------------- 附着/解绑 ---------------------------
 	void AttachToTipKeepWorld()
 	{
 		var t = bobber.transform;
@@ -793,7 +809,7 @@ public class FishingPhysics2D : MonoBehaviour
 			bobber.transform.localPosition = Vector3.zero;
 		}
 	}
-	// 统一更新鼠标方向缓存（相对竿梢）
+    // 统一更新鼠标方向缓存（相对竿梢）
 	void UpdateCastDir()
 	{
 		Vector2 origin = rodTip ? (Vector2)rodTip.position : (Vector2)transform.position;
@@ -801,7 +817,7 @@ public class FishingPhysics2D : MonoBehaviour
 		Vector2 delta = (mouse - origin);
         mouseSideSign = (delta.x >= 0f) ? 1f : -1f;
 	}
-	// 围绕 RodRoot 旋转
+    // 围绕 RodRoot 旋转
 	void ApplyRootBackAngle(float backDeg)
 	{
 		if (!RodRoot) return;
@@ -811,7 +827,7 @@ public class FishingPhysics2D : MonoBehaviour
 		// 基于 RodRoot 的 home 旋转
 		RodRoot.localRotation = rodRootHomeRot * Quaternion.Euler(0f, 0f, backDeg);
 	}
-	// --------------------------- 竿前倾保持 ---------------------------
+    // --------------------------- 竿前倾保持 ---------------------------
 	void HoldRodForwardTemporarily()
 	{
 		if (!hinge1 || hingeHoldActive) return;
@@ -852,6 +868,9 @@ public class FishingPhysics2D : MonoBehaviour
 	}
 
 
+    #endregion
+
+    #region Motor / Helpers
     // ========================= Motor / Helpers =========================
 	void PulseHingeTowardMouse()
 	{
@@ -886,6 +905,9 @@ public class FishingPhysics2D : MonoBehaviour
 		return L * k / denom;
 	}
 
+    #endregion
+
+    #region Rendering
     // ========================= Rendering (LineRenderer) =========================
 	void ConfigureLine()
 	{
@@ -918,6 +940,9 @@ public class FishingPhysics2D : MonoBehaviour
 		lr.enabled = !(phase == Phase.Idle || phase == Phase.Charging);
 	}
 
+    #endregion
+
+    #region Safety
     // ========================= Safety =========================
 	void Watchdog()
 	{
@@ -930,6 +955,9 @@ public class FishingPhysics2D : MonoBehaviour
 		}
 	}
 
+    #endregion
+
+    #region UI Fade
     // ========================= UI Fade =========================
 	void StartUiFadeOut() { uiFading = chargeSlider != null; uiFadeT = 0f; }
 	void TickUiFade(float dt)
@@ -942,6 +970,9 @@ public class FishingPhysics2D : MonoBehaviour
 		if (uiFadeT >= dur) { chargeSlider.value = 0; chargeSlider.gameObject.SetActive(false); uiFading = false; }
 	}
 
+    #endregion
+
+    #region Phase & Debug HUD
     // ========================= Phase / Debug HUD =========================
 	void ChangePhase(Phase next)
 	{
@@ -1040,7 +1071,7 @@ public class FishingPhysics2D : MonoBehaviour
 		GUI.color = Color.white;
 	}
 
-	// --------------------------- RodRoot 角度硬限制 ---------------------------
+    // --------------------------- RodRoot 角度硬限制 ---------------------------
 	void EnforceRodRootLimits()
 	{
 		if (!RodRoot) return;
@@ -1062,7 +1093,7 @@ public class FishingPhysics2D : MonoBehaviour
 		return deg;
 	}
 
-	// 简单的线段绘制（OnGUI）
+    // 简单的线段绘制（OnGUI）
 	static class Drawing
 	{
 		static Texture2D _lineTex;
@@ -1086,7 +1117,10 @@ public class FishingPhysics2D : MonoBehaviour
 		}
 	}
 
-	// --------------------------- 事件容器 ---------------------------
+    #endregion
+
+    #region Utilities & Nested Types
+    // --------------------------- 事件容器 ---------------------------
 	[System.Serializable]
 	public class FishingEvents
 	{
@@ -1099,7 +1133,7 @@ public class FishingPhysics2D : MonoBehaviour
 		public UnityEvent onReset;
 	}
 
-	// --------------------------- 工具：刚体/关节清理 ---------------------------
+    // --------------------------- 工具：刚体/关节清理 ---------------------------
 	void ZeroRB(Rigidbody2D rb)
 	{
 		if (!rb) return;
@@ -1118,7 +1152,7 @@ public class FishingPhysics2D : MonoBehaviour
 		}
 	}
 
-	// --------------------------- 有限状态机（同文件内隔离） ---------------------------
+    // --------------------------- 有限状态机（同文件内隔离） ---------------------------
 	public class PhaseMachine
 	{
 		public Phase current;
@@ -1152,7 +1186,7 @@ public class FishingPhysics2D : MonoBehaviour
 		}
 	}
 
-	// --------------------------- 配置容器 ---------------------------
+    // --------------------------- 配置容器 ---------------------------
 	[System.Serializable]
 	public class FishingConfig
 	{
@@ -1190,7 +1224,7 @@ public class FishingPhysics2D : MonoBehaviour
 		// removed legacy per-hold limits (use Rod Limits)
 	}
 
-	public void ApplyConfig()
+    public void ApplyConfig()
 	{
 		if (config == null) return;
 		// Cast
@@ -1209,5 +1243,6 @@ public class FishingPhysics2D : MonoBehaviour
 		lineSegments = config.lineSegments; pixelsPerUnit = config.pixelsPerUnit; sortingOrder = config.sortingOrder; lineColor = config.lineColor;
 		// Rod hold
 		holdRodForward = config.holdRodForward; holdForwardDuration = config.holdForwardDuration;
-	}
+    }
+    #endregion
 }
