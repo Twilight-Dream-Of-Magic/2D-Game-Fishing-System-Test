@@ -356,10 +356,10 @@ public class FishingPhysics2D : MonoBehaviour
 
         float side = mouseSideSign;
 
-		// 用 FixedUpdate 缓存的真实竿梢速度；前甩目标方向=鼠标相反的水平向
-		Vector2 vTip = tipVelFixed;
+        // 用 FixedUpdate 缓存的真实竿梢速度；前甩目标方向=鼠标相反的水平向
+        Vector2 tipVelocity = tipVelFixed;
         Vector2 releaseDir = (mouseSideSign > 0) ? Vector2.left : Vector2.right;
-        float tipFwd = (vTip.sqrMagnitude < EPS) ? -999f : Vector2.Dot(vTip.normalized, releaseDir);
+        float tipFwd = (tipVelocity.sqrMagnitude < EPS) ? -999f : Vector2.Dot(tipVelocity.normalized, releaseDir);
 		bool apex = releaseAtForwardApex && tipFwdPrev > -998f && tipFwdPrev > tipFwd; // 前向速度开始回落
 		tipFwdPrev = tipFwd;
 
@@ -375,22 +375,22 @@ public class FishingPhysics2D : MonoBehaviour
 			ApplyRootBackAngle(currentBackAngleDeg);
 		}
 
-		if (apex || whipT >= whipPulse) ReleaseNow(releaseDir, vTip);
+        if (apex || whipT >= whipPulse) ReleaseNow(releaseDir, tipVelocity);
 	}
 
-	void ReleaseNow(Vector2 releaseDir, Vector2 vTip)
+    void ReleaseNow(Vector2 releaseDir, Vector2 tipVelocity)
 	{
 		// 解析推算的额外速度（与规划线长 / 阻尼 / 时间窗有关）
-		float v0 = ropeFlightSpeed; // 由精简参数直接控制解析前向速度
+        float forwardSpeedPlanned = ropeFlightSpeed; // 由精简参数直接控制解析前向速度
 
 		DetachFromTipKeepWorld();
 		bobber.linearDamping = airDrag;
 		bobber.gravityScale = flightGravity; // 抛物线感觉
 
-		// 初速度：竿梢切向 + 解析前向（使用传入的 releaseDir，已在 Whip 阶段决定为“与鼠标相反的水平向”）
-		float vTipAlong = Vector2.Dot(vTip, releaseDir);
-		Vector2 vTipForward = Mathf.Max(0f, vTipAlong) * releaseDir; // 防止反向分量
-		Vector2 vInit = vTipForward * Mathf.Max(0f, tipBoost) + releaseDir * ropeFlightSpeed * Mathf.Max(0f, extraBoost);
+        // 初速度：竿梢切向 + 解析前向（使用传入的 releaseDir，已在 Whip 阶段决定为“与鼠标相反的水平向”）
+        float tipSpeedAlong = Vector2.Dot(tipVelocity, releaseDir);
+        Vector2 tipVelocityForward = Mathf.Max(0f, tipSpeedAlong) * releaseDir; // 防止反向分量
+        Vector2 vInit = tipVelocityForward * Mathf.Max(0f, tipBoost) + releaseDir * forwardSpeedPlanned * Mathf.Max(0f, extraBoost);
 		bobber.linearVelocity = vInit;
 
 		// 线控：释放时设置
@@ -402,7 +402,7 @@ public class FishingPhysics2D : MonoBehaviour
 
 		lastReleaseSpeed = vInit.magnitude;
 		if (events?.onRelease != null) events.onRelease.Invoke();
-		Debug.Log($"[Fishing] RELEASE vTip={vTip.magnitude:F2} v0={v0:F2}", this);
+        Debug.Log($"[Fishing] RELEASE tip={tipVelocity.magnitude:F2} fwd={forwardSpeedPlanned:F2}", this);
 
 		// 抛出后短暂保持前倾（可选）
 		if (holdRodForward) HoldRodForwardTemporarily();
