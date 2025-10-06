@@ -169,13 +169,13 @@ public class FishingPhysics2D : MonoBehaviour
 	PhaseMachine fsm = new PhaseMachine();
 
 	LineRenderer lr;
-	float charge01, castTimer, plannedLen;
-	float uiFadeT; bool uiFading;
-	float whipT, tipFwdPrev;             // 甩竿计时 & 前向度量
-	int tautFrames;                      // 连续“已绷紧”计数
+    float chargeProgress01, flightElapsed, plannedRopeLen;
+    float uiFadeElapsed; bool uiFading;
+    float whipElapsed, tipForwardnessPrev;     // 甩竿计时 & 前向度量
+    int tautFrameCount;                          // 连续“已绷紧”计数
 
 	// 竿梢“真实”速度（由 Seg3 刚体在 FixedUpdate 计算）
-	Vector2 tipVelFixed;
+    Vector2 tipVelocityFixed;
 	// 鼠标决定的当前抛投方向（相对竿梢）和左右符号（简化版）
     Vector2 castDir = Vector2.right;      // 完整方向（含Y），用于点积判断
     float mouseSideSign = 1f;             // 水平符号：右=+1，左=-1，用于后仰/前甩与水平初速
@@ -204,7 +204,7 @@ public class FishingPhysics2D : MonoBehaviour
 	// Debug 运行统计与历史
 	int castCount;          // 总抛次数
 	float maxCastDistance;  // 历史最远落水长度
-	float lastCastLen;      // 上一次落水长度
+    float lastLockedLen;      // 上一次落水长度
 	float lastReleaseSpeed; // 上一次释放初速
 							// 水命中计时
 	bool sawWater;          // 本次飞行是否已首次命中水
@@ -274,7 +274,7 @@ public class FishingPhysics2D : MonoBehaviour
 		{
 			// 关键：用动态段 RigidBody2D 的 GetPointVelocity 取世界上一点的线速度
 			// 即便 RodTip 本身是 Kinematic 也能得到真实速度
-			tipVelFixed = seg3.GetPointVelocity(rodTip.position);
+        tipVelocityFixed = seg3.GetPointVelocity(rodTip.position);
 		}
 	}
 
@@ -310,8 +310,8 @@ public class FishingPhysics2D : MonoBehaviour
     // ========================= State Machine Handlers =========================
 	void BeginCharging()
 	{
-		ChangePhase(Phase.Charging);
-		charge01 = 0f; castTimer = 0f;
+        ChangePhase(Phase.Charging);
+        chargeProgress01 = 0f; flightElapsed = 0f;
 
 		if (chargeSlider) { chargeSlider.value = 0; chargeSlider.gameObject.SetActive(true); }
 
@@ -325,8 +325,8 @@ public class FishingPhysics2D : MonoBehaviour
 
 	void TickCharging(float dt)
 	{
-		charge01 = Mathf.Min(1f, charge01 + 1.6f * dt);
-		if (chargeSlider) chargeSlider.value = charge01;
+        chargeProgress01 = Mathf.Min(1f, chargeProgress01 + 1.6f * dt);
+        if (chargeSlider) chargeSlider.value = chargeProgress01;
 
 		// 禁用根节马达，Charging 仅用确定性后仰角呈现
 		if (hinge1) hinge1.useMotor = false;
@@ -337,7 +337,7 @@ public class FishingPhysics2D : MonoBehaviour
 
 		// 目标后仰角（按蓄力幅度）
 		// t = 蓄力幅度（0..1）
-		float t = Mathf.Pow(Mathf.Clamp01(charge01), Mathf.Max(0.0001f, powerCurve));
+        float t = Mathf.Pow(Mathf.Clamp01(chargeProgress01), Mathf.Max(0.0001f, powerCurve));
 
 		// 规则：点左边(side=-1) => 竿向左后仰(角度为+backAngleDeg)；点右边(side=+1) => 竿向右后仰(角度为-backAngleDeg)
         float targetDeg = (mouseSideSign < 0 ? +backAngleDeg : -backAngleDeg) * t;
@@ -351,35 +351,35 @@ public class FishingPhysics2D : MonoBehaviour
 	void BeginWhip()
 	{
 		ChangePhase(Phase.Whip);
-		whipT = 0f; tipFwdPrev = -999f;
+        whipElapsed = 0f; tipForwardnessPrev = -999f;
 
-		// 线性：最小~最大之间的 charge01 百分比
-		plannedLen = Mathf.Lerp(ropeMinLen, ropeMaxLen, Mathf.Clamp01(charge01));
+        // 线性：最小~最大之间的 charge 百分比
+        plannedRopeLen = Mathf.Lerp(ropeMinLen, ropeMaxLen, Mathf.Clamp01(chargeProgress01));
 
 		if (chargeSlider) StartUiFadeOut();
 		PulseHingeTowardMouse();
 		if (events?.onWhipBegin != null) events.onWhipBegin.Invoke();
-		Debug.Log($"[Fishing] WHIP charge={charge01:F2} lenPlan={plannedLen:F2}", this);
+        Debug.Log($"[Fishing] WHIP charge={chargeProgress01:F2} lenPlan={plannedRopeLen:F2}", this);
 	}
 
 	void TickWhip(float dt)
 	{
-		whipT += dt;
+        whipT += dt;
 		bobber.transform.localPosition = Vector3.zero;
 
         float side = mouseSideSign;
 
         // 用 FixedUpdate 缓存的真实竿梢速度；前甩目标方向=鼠标相反的水平向
-        Vector2 tipVelocity = tipVelFixed;
+        Vector2 tipVelocity = tipVelocityFixed;
         Vector2 releaseDir = (mouseSideSign > 0) ? Vector2.left : Vector2.right;
-        float tipFwd = (tipVelocity.sqrMagnitude < EPS) ? -999f : Vector2.Dot(tipVelocity.normalized, releaseDir);
-		bool apex = releaseAtForwardApex && tipFwdPrev > -998f && tipFwdPrev > tipFwd; // 前向速度开始回落
-		tipFwdPrev = tipFwd;
+        float tipForwardness = (tipVelocity.sqrMagnitude < EPS) ? -999f : Vector2.Dot(tipVelocity.normalized, releaseDir);
+        bool apex = releaseAtForwardApex && tipFwdPrev > -998f && tipFwdPrev > tipForwardness; // 前向速度开始回落
+        tipFwdPrev = tipForwardness;
 
 		// 根节点前倾动画：将 backAngle 朝前倾过渡（与鼠标方向一致）
 		if (animateRodRootInWhip && RodRoot)
 		{
-			float p = Mathf.Clamp01(whipT / Mathf.Max(0.02f, whipPulse));
+            float p = Mathf.Clamp01(whipT / Mathf.Max(0.02f, whipPulse));
 			float targetDeg = Mathf.Lerp(currentBackAngleDeg,
                                          mouseSideSign * Mathf.Abs(forwardAngleDeg),
 										 p);
@@ -407,11 +407,11 @@ public class FishingPhysics2D : MonoBehaviour
 		bobber.linearVelocity = vInit;
 
 		// 线控：释放时设置
-		castMaxLen = Mathf.Clamp(plannedLen, ropeMinLen, ropeMaxLen);
+        castMaxLen = Mathf.Clamp(plannedRopeLen, ropeMinLen, ropeMaxLen);
 		SetRopeForRelease();
 
 		ChangePhase(Phase.Flight);
-		castTimer = 0f; tautFrames = 0; sawWater = false; waterHitT = 0f;
+        castTimer = 0f; tautFrames = 0; sawWater = false; waterHitT = 0f;
 
 		lastReleaseSpeed = vInit.magnitude;
 		if (events?.onRelease != null) events.onRelease.Invoke();
