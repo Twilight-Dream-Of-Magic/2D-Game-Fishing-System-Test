@@ -731,6 +731,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 319760382}
+  - component: {fileID: 319760384}
   - component: {fileID: 319760383}
   m_Layer: 0
   m_Name: RodRoot
@@ -747,14 +748,14 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 319760381}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalRotation: {x: 0, y: 0, z: -0.7071068, w: 0.7071068}
+  m_LocalPosition: {x: 0, y: -0, z: 0}
+  m_LocalScale: {x: 2, y: 2, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 2002643241}
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: -90}
 --- !u!50 &319760383
 Rigidbody2D:
   serializedVersion: 5
@@ -782,6 +783,61 @@ Rigidbody2D:
   m_SleepingMode: 1
   m_CollisionDetection: 0
   m_Constraints: 7
+--- !u!212 &319760384
+SpriteRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 319760381}
+  m_Enabled: 1
+  m_CastShadows: 0
+  m_ReceiveShadows: 0
+  m_DynamicOccludee: 1
+  m_StaticShadowCaster: 0
+  m_MotionVectors: 1
+  m_LightProbeUsage: 1
+  m_ReflectionProbeUsage: 1
+  m_RayTracingMode: 0
+  m_RayTraceProcedural: 0
+  m_RayTracingAccelStructBuildFlagsOverride: 0
+  m_RayTracingAccelStructBuildFlags: 1
+  m_SmallMeshCulling: 1
+  m_RenderingLayerMask: 1
+  m_RendererPriority: 0
+  m_Materials:
+  - {fileID: 2100000, guid: a97c105638bdf8b4a8650670310a4cd3, type: 2}
+  m_StaticBatchInfo:
+    firstSubMesh: 0
+    subMeshCount: 0
+  m_StaticBatchRoot: {fileID: 0}
+  m_ProbeAnchor: {fileID: 0}
+  m_LightProbeVolumeOverride: {fileID: 0}
+  m_ScaleInLightmap: 1
+  m_ReceiveGI: 1
+  m_PreserveUVs: 0
+  m_IgnoreNormalsForChartDetection: 0
+  m_ImportantGI: 0
+  m_StitchLightmapSeams: 1
+  m_SelectedEditorRenderState: 0
+  m_MinimumChartSize: 4
+  m_AutoUVMaxDistance: 0.5
+  m_AutoUVMaxAngle: 89
+  m_LightmapParameters: {fileID: 0}
+  m_SortingLayerID: 0
+  m_SortingLayer: 0
+  m_SortingOrder: 1
+  m_Sprite: {fileID: -4789670105439411607, guid: 122b9c7604f2de54595704aa111611e5, type: 3}
+  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_FlipX: 0
+  m_FlipY: 0
+  m_DrawMode: 0
+  m_Size: {x: 0.42, y: 0.03}
+  m_AdaptiveModeThreshold: 0.5
+  m_SpriteTileMode: 0
+  m_WasSpriteAssigned: 1
+  m_MaskInteraction: 0
+  m_SpriteSortPoint: 0
 --- !u!1 &486999482
 GameObject:
   m_ObjectHideFlags: 0
@@ -832,7 +888,7 @@ HingeJoint2D:
   m_BreakAction: 3
   m_AutoConfigureConnectedAnchor: 1
   m_Anchor: {x: 0, y: 0}
-  m_ConnectedAnchor: {x: 0, y: 0}
+  m_ConnectedAnchor: {x: -0, y: 0}
   m_UseConnectedAnchor: 1
   m_UseMotor: 0
   m_Motor:
@@ -854,7 +910,7 @@ Rigidbody2D:
   m_Simulated: 1
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
-  m_Mass: 1
+  m_Mass: 0.0001
   m_LinearDamping: 2
   m_AngularDamping: 2
   m_GravityScale: 0
@@ -1165,7 +1221,7 @@ HingeJoint2D:
   m_BreakAction: 3
   m_AutoConfigureConnectedAnchor: 1
   m_Anchor: {x: 0, y: 0}
-  m_ConnectedAnchor: {x: 0, y: 0}
+  m_ConnectedAnchor: {x: -0, y: 0}
   m_UseConnectedAnchor: 1
   m_UseMotor: 0
   m_Motor:
@@ -1187,7 +1243,7 @@ Rigidbody2D:
   m_Simulated: 1
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
-  m_Mass: 1
+  m_Mass: 0.0001
   m_LinearDamping: 2
   m_AngularDamping: 2
   m_GravityScale: 0
@@ -1452,6 +1508,26 @@ LineRenderer:
   m_SortingOrder: 2
   m_Positions:
   - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
+  - {x: 0, y: 0, z: 0}
   m_Parameters:
     serializedVersion: 3
     widthMultiplier: 1
@@ -1460,13 +1536,22 @@ LineRenderer:
       m_Curve:
       - serializedVersion: 3
         time: 0
-        value: 1
+        value: 0.0078125
         inSlope: 0
         outSlope: 0
         tangentMode: 0
         weightedMode: 0
-        inWeight: 0.33333334
-        outWeight: 0.33333334
+        inWeight: 0
+        outWeight: 0
+      - serializedVersion: 3
+        time: 1
+        value: 0.0078125
+        inSlope: 0
+        outSlope: 0
+        tangentMode: 0
+        weightedMode: 0
+        inWeight: 0
+        outWeight: 0
       m_PreInfinity: 2
       m_PostInfinity: 2
       m_RotationOrder: 4
@@ -1538,72 +1623,101 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1ff9b14384a474644a148a14ca0f1c98, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  events:
+    onChargeStart:
+      m_PersistentCalls:
+        m_Calls: []
+    onWhipBegin:
+      m_PersistentCalls:
+        m_Calls: []
+    onRelease:
+      m_PersistentCalls:
+        m_Calls: []
+    onLand:
+      m_PersistentCalls:
+        m_Calls: []
+    onReelStart:
+      m_PersistentCalls:
+        m_Calls: []
+    onReelFinish:
+      m_PersistentCalls:
+        m_Calls: []
+    onReset:
+      m_PersistentCalls:
+        m_Calls: []
+  logPhaseChanges: 1
   chargeSlider: {fileID: 775632984}
-  waterMask:
+  waterLayerMask:
     serializedVersion: 2
-    m_Bits: 16
-  seg1: {fileID: 2002643243}
-  seg2: {fileID: 486999485}
-  seg3: {fileID: 686797899}
-  rodTip: {fileID: 1695506048}
-  hinge1: {fileID: 2002643242}
-  hinge2: {fileID: 486999484}
-  hinge3: {fileID: 686797898}
-  bobber: {fileID: 1314692218}
-  rope: {fileID: 1314692216}
-  minCast: 4
-  maxCast: 8
-  chargeSpeed: 1.6
-  flightTime: 0.35
-  landTimeout: 3
-  airDrag: 0.4
-  waterDrag: 4
-  reelRate: 6
-  reelForce: 12
-  whipMotorSpeed: 1200
-  whipPulse: 0.09
-  releaseAtForwardApex: 1
-  flightGravity: 0.15
-  tipBoost: 1.6
-  extraBoost: 1.1
-  powerCurve:
-    serializedVersion: 2
-    m_Curve:
-    - serializedVersion: 3
-      time: 0
-      value: 0.05
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0
-      outWeight: 0
-    - serializedVersion: 3
-      time: 1
-      value: 1
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0
-      outWeight: 0
-    m_PreInfinity: 2
-    m_PostInfinity: 2
-    m_RotationOrder: 4
-  minLaunchSpeed: 5
-  maxLaunchSpeed: 28
-  inheritTip: 1
-  lineSegments: 16
-  pixelsPerUnit: 128
-  sortingOrder: 10
+    m_Bits: 0
+  RodRootTransform: {fileID: 319760382}
+  RodSegment1RB: {fileID: 2002643243}
+  RodSegment2RB: {fileID: 486999485}
+  RodSegment3RB: {fileID: 686797899}
+  RodTipRB: {fileID: 1695506048}
+  RodSegment1Hinge: {fileID: 2002643242}
+  RodSegment2Hinge: {fileID: 486999484}
+  RodSegment3Hinge: {fileID: 686797898}
+  bobberRB: {fileID: 1314692218}
+  bobberRopeJoint: {fileID: 1314692216}
+  airDamping: 0.1
+  waterDamping: 4.5
+  reelDistancePerSecond: 10
+  reelPullForce: 20
+  whipMotorAngularSpeed: 2000
+  whipPulseDuration: 0.1
+  animateRodRootInWhipEnabled: 1
+  maxForwardAngleDegreesInWhip: 60
+  powerCurveExponent: 0.75
+  maxBackwardAngleDegrees: 60
+  chargingRotationSmoothTime: 0.06
+  flightSlackRatio: 0.06
+  tautFramesThresholdToLand: 2
+  offscreenMarginRatio: 0.05
+  landOnlyOnWaterEnabled: 1
+  waterLandingSettleDelay: 0.2
+  waterLockSpeedThreshold: 0.8
+  ropeMinLength: 0.5
+  ropeMaxLength: 3.5
+  ropeMinFlightTime: 1
+  ropeFlightMaxTimeout: 3
+  ropeForwardFlightSpeed: 20
+  ropeUnlimitedEnabled: 0
+  ropeSpoolOutEnabled: 1
+  ropeSpoolDuration: 1.5
+  ropeSpoolSlackRatio: 0.15
+  minForwardSpeed: 8
+  maxForwardSpeed: 24
+  chargeToSpeedExponent: 1.2
+  lineRendererSegments: 20
+  linePixelsPerUnit: 128
+  lineSortingOrder: 10
   lineColor: {r: 1, g: 0.1, b: 0.6, a: 1}
-  watchdogFactor: 3
-  drawDebugLine: 1
-  snapRodOnReelFinish: 1
-  snapRodAlsoFromEmergencyReset: 1
-  slackRatio: 0.12
-  tautFramesToLand: 2
-  offscreenMargin: 0.04
+  debugDrawLineEnabled: 1
+  snapRodOnReelFinishEnabled: 1
+  snapRodOnEmergencyResetEnabled: 1
+  snapRodOnLandEnabled: 0
+  canReelAnytime: 1
+  holdRodForwardEnabled: 1
+  holdForwardDuration: 0.55
+  RodLimitEnabled: 1
+  RotRootMinAngleLimit: -80
+  RotRootMaxAngleLimit: 80
+  setBobberKinematicAtCap: 1
+  useChargeAsMax: 1
+  flightGravityScale: 0.1
+  spoolingMicroGravityScale: 0.01
+  flightBoostDuration: 0.08
+  cruiseLinearDamping: 0.25
+  boostLinearDamping: 0.55
+  descentLinearDamping: 0.05
+  descentGravityMultiplier: 1.35
+  cruiseEnterSpeed: 5.5
+  descentEnterDownSpeed: 2
+  stopAtCapInAirEnabled: 1
+  capTautFramesThreshold: 1
+  capTolerance: 0.02
+  forceStopOffscreenEnabled: 1
 --- !u!1 &1246818911
 GameObject:
   m_ObjectHideFlags: 0
@@ -1850,8 +1964,8 @@ Transform:
   m_GameObject: {fileID: 1314692213}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: 0.7071067, w: 0.7071069}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 0.5, y: 0.5, z: 1}
+  m_LocalPosition: {x: 0, y: -0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1695506047}
@@ -1924,7 +2038,7 @@ Rigidbody2D:
   m_Simulated: 1
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
-  m_Mass: 1
+  m_Mass: 0.0001
   m_LinearDamping: 2
   m_AngularDamping: 2
   m_GravityScale: 0
@@ -2230,7 +2344,6 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 2002643241}
-  - component: {fileID: 2002643244}
   - component: {fileID: 2002643243}
   - component: {fileID: 2002643242}
   m_Layer: 0
@@ -2248,14 +2361,14 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2002643240}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: -0.38268343, w: 0.92387956}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 2, y: 2, z: 1}
+  m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 486999483}
   m_Father: {fileID: 319760382}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: -45}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!233 &2002643242
 HingeJoint2D:
   m_ObjectHideFlags: 0
@@ -2272,7 +2385,7 @@ HingeJoint2D:
   m_BreakAction: 3
   m_AutoConfigureConnectedAnchor: 1
   m_Anchor: {x: 0, y: 0}
-  m_ConnectedAnchor: {x: 0, y: 0}
+  m_ConnectedAnchor: {x: -0, y: 0}
   m_UseConnectedAnchor: 1
   m_UseMotor: 0
   m_Motor:
@@ -2294,7 +2407,7 @@ Rigidbody2D:
   m_Simulated: 1
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
-  m_Mass: 1
+  m_Mass: 0.0001
   m_LinearDamping: 2
   m_AngularDamping: 2
   m_GravityScale: 0
@@ -2309,61 +2422,6 @@ Rigidbody2D:
   m_SleepingMode: 1
   m_CollisionDetection: 0
   m_Constraints: 0
---- !u!212 &2002643244
-SpriteRenderer:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2002643240}
-  m_Enabled: 1
-  m_CastShadows: 0
-  m_ReceiveShadows: 0
-  m_DynamicOccludee: 1
-  m_StaticShadowCaster: 0
-  m_MotionVectors: 1
-  m_LightProbeUsage: 1
-  m_ReflectionProbeUsage: 1
-  m_RayTracingMode: 0
-  m_RayTraceProcedural: 0
-  m_RayTracingAccelStructBuildFlagsOverride: 0
-  m_RayTracingAccelStructBuildFlags: 1
-  m_SmallMeshCulling: 1
-  m_RenderingLayerMask: 1
-  m_RendererPriority: 0
-  m_Materials:
-  - {fileID: 2100000, guid: a97c105638bdf8b4a8650670310a4cd3, type: 2}
-  m_StaticBatchInfo:
-    firstSubMesh: 0
-    subMeshCount: 0
-  m_StaticBatchRoot: {fileID: 0}
-  m_ProbeAnchor: {fileID: 0}
-  m_LightProbeVolumeOverride: {fileID: 0}
-  m_ScaleInLightmap: 1
-  m_ReceiveGI: 1
-  m_PreserveUVs: 0
-  m_IgnoreNormalsForChartDetection: 0
-  m_ImportantGI: 0
-  m_StitchLightmapSeams: 1
-  m_SelectedEditorRenderState: 0
-  m_MinimumChartSize: 4
-  m_AutoUVMaxDistance: 0.5
-  m_AutoUVMaxAngle: 89
-  m_LightmapParameters: {fileID: 0}
-  m_SortingLayerID: 0
-  m_SortingLayer: 0
-  m_SortingOrder: 1
-  m_Sprite: {fileID: -4789670105439411607, guid: 122b9c7604f2de54595704aa111611e5, type: 3}
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
-  m_FlipX: 0
-  m_FlipY: 0
-  m_DrawMode: 0
-  m_Size: {x: 0.42, y: 0.03}
-  m_AdaptiveModeThreshold: 0.5
-  m_SpriteTileMode: 0
-  m_WasSpriteAssigned: 1
-  m_MaskInteraction: 0
-  m_SpriteSortPoint: 0
 --- !u!1 &2037216198
 GameObject:
   m_ObjectHideFlags: 0
