@@ -1661,11 +1661,11 @@ MonoBehaviour:
   bobberRB: {fileID: 1314692218}
   bobberRopeJoint: {fileID: 1314692216}
   airDamping: 0.1
-  waterDamping: 4.5
+  waterDamping: 2
   reelDistancePerSecond: 10
   reelPullForce: 20
-  whipMotorAngularSpeed: 2000
-  whipPulseDuration: 0.1
+  whipMotorAngularSpeed: 1000
+  whipPulseDuration: 0.15
   animateRodRootInWhipEnabled: 1
   maxForwardAngleDegreesInWhip: 60
   powerCurveExponent: 0.75
@@ -1674,21 +1674,16 @@ MonoBehaviour:
   flightSlackRatio: 0.06
   tautFramesThresholdToLand: 2
   offscreenMarginRatio: 0.05
-  landOnlyOnWaterEnabled: 1
-  waterLandingSettleDelay: 0.2
-  waterLockSpeedThreshold: 0.8
-  ropeMinLength: 0.5
-  ropeMaxLength: 3.5
+  landOnlyOnWaterEnabled: 0
+  waterLandingSettleDelay: 2
+  waterLockSpeedThreshold: 0.01
+  ropeMinLength: 0.01
+  ropeMaxLength: 4
   ropeMinFlightTime: 1
-  ropeFlightMaxTimeout: 3
-  ropeForwardFlightSpeed: 20
+  ropeFlightMaxTimeout: 1
+  ropeForwardFlightSpeed: 1e+10
   ropeUnlimitedEnabled: 0
-  ropeSpoolOutEnabled: 1
-  ropeSpoolDuration: 1.5
-  ropeSpoolSlackRatio: 0.15
-  minForwardSpeed: 8
-  maxForwardSpeed: 24
-  chargeToSpeedExponent: 1.2
+  ropeSpoolDuration: 5
   lineRendererSegments: 20
   linePixelsPerUnit: 128
   lineSortingOrder: 10
@@ -1701,23 +1696,32 @@ MonoBehaviour:
   holdRodForwardEnabled: 1
   holdForwardDuration: 0.55
   RodLimitEnabled: 1
-  RotRootMinAngleLimit: -80
-  RotRootMaxAngleLimit: 80
+  RotRootMinAngleLimit: -60
+  RotRootMaxAngleLimit: 60
   setBobberKinematicAtCap: 1
-  useChargeAsMax: 1
-  flightGravityScale: 0.1
+  flightGravityScale: 0.07
   spoolingMicroGravityScale: 0.01
-  flightBoostDuration: 0.08
-  cruiseLinearDamping: 0.25
-  boostLinearDamping: 0.55
-  descentLinearDamping: 0.05
+  flightBoostDuration: 0.05
+  boostLinearDamping: 0.8
   descentGravityMultiplier: 1.35
-  cruiseEnterSpeed: 5.5
-  descentEnterDownSpeed: 2
+  cruiseEnterSpeed: 5
+  useChargeAsMax: 1
   stopAtCapInAirEnabled: 1
-  capTautFramesThreshold: 1
+  capTautFramesThreshold: 5
   capTolerance: 0.02
   forceStopOffscreenEnabled: 1
+  scriptedArcReleaseEnabled: 1
+  scriptedSpeedPerM_Low: 1
+  scriptedSpeedPerM_High: 4
+  scriptedSpeedFloor: 3.5
+  c1Along: 0.22
+  c2Along: 0.78
+  c1UpMin: 0.15
+  c1UpMax: 1
+  c2UpMin: 0.02
+  c2UpMax: 0.25
+  scriptedMinTime: 0.25
+  scriptedMaxTime: 1.1
 --- !u!1 &1246818911
 GameObject:
   m_ObjectHideFlags: 0
