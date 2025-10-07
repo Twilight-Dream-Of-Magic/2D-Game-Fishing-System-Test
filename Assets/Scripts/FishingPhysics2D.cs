@@ -8,7 +8,6 @@ using UnityEngine.UI;
 using UnityEngine.Events;
 using System;
 using System.Collections;
-using System.Runtime.InteropServices;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(LineRenderer))]
