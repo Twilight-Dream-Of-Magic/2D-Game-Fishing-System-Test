@@ -7,6 +7,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.Events;
 using System;
+using System.Collections;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(LineRenderer))]
@@ -48,8 +49,8 @@ public class FishingPhysics2D : MonoBehaviour
 	public float reelPullForce = 14f;
 
 	[Header("Whip（甩竿）")]
-	public float whipMotorAngularSpeed = 1100f;
-	public float whipPulseDuration = 0.14f;
+	public float whipMotorAngularSpeed = 1000f;
+	public float whipPulseDuration = 0.1f;
 
 	[Header("Whip Animation（根节点动画）")]
 	[Tooltip("Whip 阶段是否同时动画 RodRoot 角度")]
@@ -60,12 +61,6 @@ public class FishingPhysics2D : MonoBehaviour
 	public float maxForwardAngleDegreesInWhip = 60f;
 
 	[Header("Launch Feel（手感增强）")]
-	[Tooltip("竿梢速度增益")]
-	public float tipVelocityMultiplier = 1.30f;
-
-	[Tooltip("解析额外速度增益")]
-	public float extraVelocityMultiplier = 1.00f;
-
 	[Tooltip("蓄力曲线 >1 变硬，<1 变软")]
 	public float powerCurveExponent = 1.20f;
 
@@ -128,8 +123,14 @@ public class FishingPhysics2D : MonoBehaviour
 	[Tooltip("放线时的额外松弛比例")]
 	public float ropeSpoolSlackRatio = 0.06f;
 
-	float targetRopeLength;
-	float ropeSpoolElapsed;
+	// === Charge → Speed Mapping（让蓄力影响初速度）===
+	[Header("Charge → Speed Mapping")]
+	[Tooltip("蓄力=0 时的基础前向速度（m/s）")]
+	public float minForwardSpeed = 6f;
+	[Tooltip("蓄力=1 时的基础前向速度（m/s）")]
+	public float maxForwardSpeed = 19f;
+	[Tooltip("蓄力到速度的指数，>1 硬，<1 软")]
+	public float chargeToSpeedExponent = 1.20f;
 
 	[Header("Line Renderer")]
 	[Min(2)]
@@ -170,14 +171,6 @@ public class FishingPhysics2D : MonoBehaviour
 	[Tooltip("根节最大角（度，正为向前）")]
 	public float RotRootMaxAngleLimit = 60f;
 
-	[Header("Gravity Configs")]
-	[Tooltip("飞行期的重力系数（顶视角 0.10~0.30）")]
-	[Range(0.01f, 9.81f)]
-	public float flightGravityScale = 0.18f;
-	[Tooltip("放线期间使用的微重力（不影响放线逻辑）")]
-	[Range(0.0001f, 0.01f)]
-	public float spoolingMicroGravityScale = 0.01f;
-
 	[Header("Micro/Cap Lock")]
 	[Tooltip("到达cap后是否把浮标设为Kinematic（完全免疫力）")]
 	public bool setBobberKinematicAtCap = true;
@@ -185,6 +178,42 @@ public class FishingPhysics2D : MonoBehaviour
 	[Header("Charge Limit")]
 	[Tooltip("把蓄力条映射为‘本次抛投的最大线长上限’")]
 	public bool useChargeAsMax = true;
+
+	[Header("Gravity Configs")]
+	[Tooltip("飞行期的重力系数（顶视角 0.001~1）")]
+	[Range(0.001f, 1f)]
+	public float flightGravityScale = 0.18f;
+	[Tooltip("放线期间使用的微重力（不影响放线逻辑）")]
+	[Range(0.0001f, 0.01f)]
+	public float spoolingMicroGravityScale = 0.01f;
+
+	[Header("Flight Dynamics（飞行分段：起飞/匀速/降落）")]
+	[Tooltip("起飞加速期的时长（秒），用正常重力 + 最大空气阻尼")]
+	[Range(0.00f, 0.25f)]
+	public float flightBoostDuration = 0.05f;
+
+	[Tooltip("空中匀速期的线性阻尼（中等）")]
+	[Range(0.00f, 5.0f)]
+	public float cruiseLinearDamping = 0.25f;
+
+	[Tooltip("起飞加速期的线性阻尼（最大）")]
+	[Range(0.00f, 8.0f)]
+	public float boostLinearDamping = 0.5f;
+
+	[Tooltip("降落期的线性阻尼（最小）")]
+	[Range(0.00f, 2.0f)]
+	public float descentLinearDamping = 0.01f;
+
+	[Tooltip("降落期重力系数的放大倍数（>1 会更快下坠、更有“砸水感”）")]
+	[Range(0.5f, 3f)]
+	public float descentGravityMultiplier = 1.35f;
+
+	[Tooltip("进入匀速期的最低速度（m/s），起飞时速未达该值会继续视为“起飞加速”")]
+	public float cruiseEnterSpeed = 5.5f;
+
+	[Tooltip("进入降落期的向下速度阈值（m/s，纵向速度<-阈值）")]
+	public float descentEnterDownSpeed = 2.0f;
+
 
 	// 每次抛投时由蓄力计算出的“本次上限”
 	float castMaxLength;
@@ -203,7 +232,7 @@ public class FishingPhysics2D : MonoBehaviour
 
 	[Header("Air Cap Lock")]
 	[Tooltip("到 cap 判定的余量")]
-	public float capTolerance = 0.02f;
+	public float capTolerance = 0.01f;
 
 	[Tooltip("离屏时是否直接空中锁死")]
 	public bool forceStopOffscreenEnabled = true;
@@ -214,20 +243,19 @@ public class FishingPhysics2D : MonoBehaviour
 	PhaseMachine phaseMachine = new PhaseMachine();
 
 	LineRenderer lineRenderer;
-	float castTimer, plannedRopeLength;
+	float ropeFlightTimer, plannedRopeLength;
 	float uiFadeElapsed; bool isUiFading;
 	float whipElapsedTime;           // 甩竿计时
 	int consecutiveTautFrames;                      // 连续“已绷紧”计数
 	float chargingSilderValue;
 	bool isAirLocked; // 空中锁定后免疫一切外力
 
-	// 竿梢“真实”速度（由 Seg3 刚体在 FixedUpdate 计算）
-	Vector2 tipVelocityFixed;
+	float targetRopeLength;
+	float ropeSpoolElapsed;
 
-	// 鼠标决定的当前鱼竿顺时针逆时针方向
-	private Vector2 ChargeDirection = Vector2.zero;
-	// 鼠标决定的当前鱼竿浮标抛投方向（相对竿梢）
-	private Vector2 ReleaseWhipDirection = Vector2.zero;
+	enum FlightSubphase { Boost, Cruise, Descent }
+	FlightSubphase flightSubphase = FlightSubphase.Boost;
+	bool flightSubphaseLockedToDescent; // 进入降落后不回跳，防抖
 
 	// Charging 阶段围绕 RodRoot 的后仰控制（避免 360° 抖动）
 	float charingRodBackAngle;
@@ -266,8 +294,6 @@ public class FishingPhysics2D : MonoBehaviour
 	JointMotor2D hingePrevMotor;
 
 	// Debug 运行统计与历史
-	float maxCastDistance;  // 历史最远落水长度
-							// 水命中计时
 	bool sawWater;          // 本次飞行是否已首次命中水
 	float waterHitTime;        // 首次命中水的相对时间（castTimer）
 
@@ -329,17 +355,6 @@ public class FishingPhysics2D : MonoBehaviour
 		if (lineRenderer) ConfigureLineRenderer();
 	}
 
-	// 物理步里**直接**用刚体求竿梢速度（旋转→切向速度）
-	void FixedUpdate()
-	{
-		if (RodSegment3RB && RodTipRB)
-		{
-			// 关键：用动态段 RigidBody2D 的 GetPointVelocity 取世界上一点的线速度
-			// 即便 RodTip 本身是 Kinematic 也能得到真实速度
-			tipVelocityFixed = RodSegment3RB.GetPointVelocity(RodTipRB.position);
-		}
-	}
-
 	// --------------------------- 主循环 ---------------------------
 	void Update()
 	{
@@ -369,94 +384,22 @@ public class FishingPhysics2D : MonoBehaviour
 	}
 
 	private Vector3 currentMousePosition;
-	// ② 参考右向：相机的 right 投到 XY
-	Vector2 ScreenRight2D()
-	{
-		if (Camera.main == null) 
-			return Vector2.right;
-		Vector3 r3 = Camera.main.transform.right;              // Transform.right（世界红轴） 
-		return new Vector2(r3.x, r3.y).normalized;              // 投到XY平面
-	}
 
-	// ③ 鼠标世界坐标（2D 正交：给 z=0；透视：给到“竿梢所在平面”的深度）
-	Vector2 MouseWorld2D()
-	{
-		if (Camera.main == null) 
-			return Vector2.zero;
-		var mp = currentMousePosition;
-
-		if (Camera.main.orthographic)
-		{
-			return (Vector2)Camera.main.ScreenToWorldPoint(new Vector3(mp.x, mp.y, 0f));
-		}
-		else
-		{
-			float tipZ = (RodTipRB != null) ? RodTipRB.transform.position.z : transform.position.z;
-			float depthFromCam = Mathf.Abs(Camera.main.transform.position.z - tipZ);
-			return (Vector2)Camera.main.ScreenToWorldPoint(new Vector3(mp.x, mp.y, depthFromCam));
-		}
-	}
-
-	// 以“屏幕右”为参考，判断鼠标相对 RodRoot (鱼竿) 在左(+1)还是右(-1)
+	// 判断鼠标相对 RodRoot (鱼竿) 在左(+1)还是右(-1)
 	float MouseSideSignOnScreen()
 	{
-		Vector2 referenceRight = ScreenRight2D();
-		Vector2 pivot = RodRootTransform ? (Vector2)RodRootTransform.position : (Vector2)transform.position;
-		Vector2 toMouse = MouseWorld2D() - pivot;
-		if (toMouse.sqrMagnitude < 1e-12f) 
-			return +1f; // 鼠标几乎在枢轴上：默认左(+)
+		Vector2 origin = RodRootTransform ? (Vector2)RodRootTransform.position : (Vector2)transform.position;
+		Vector2 mouse = Camera.main ? (Vector2)Camera.main.ScreenToWorldPoint(currentMousePosition) : origin + Vector2.right;
+		Vector2 delta = mouse - origin;
 
-		toMouse.Normalize();
-		// [-180,180] 的带符号最小夹角
-		// 左(+)/右(-)
-		return (Vector2.SignedAngle(referenceRight, toMouse) >= 0f) ? +1f : -1f;                     
-	}
-
-	// ④  以“屏幕右”为参考 判断鼠标相对 RodRoot (鱼竿) 取“后仰”的侧向（在左(+1)还是右(-1) 不使用 Sign；用带符号夹角 ）
-	Vector2 GetChargeDirectionFromScreen()
-	{
-		// 参考“屏幕右”方向（相机 Transform.right 投到 XY）
-		Vector2 referenceRight = ScreenRight2D();
-
-		Camera mainCamera = Camera.main;
-		if (!mainCamera)
-			return referenceRight;
-
-		// 用“杆根”当基点，更符合“转杆”的语义
-		Vector2 pivot = RodRootTransform ? (Vector2)RodRootTransform.position
-										 : (Vector2)transform.position;
-
-		// 2D 正交：z=0；若换透视，用到 pivot 的深度
-		float depth = mainCamera.orthographic
-			? 0f
-			: Mathf.Abs(mainCamera.transform.position.z - (RodRootTransform ? RodRootTransform.position.z : transform.position.z));
-
-		Vector2 mouse = (Vector2)mainCamera.ScreenToWorldPoint(new Vector3(currentMousePosition.x, currentMousePosition.y, depth));
-		Vector2 toMouse = mouse - pivot;
-
-		// 鼠标几乎在枢轴上：退回参考右
-		if (toMouse.sqrMagnitude < 1e-12f)
-			return referenceRight;
-
-		// 用 if 判断左右半平面
-		float angle = Vector2.SignedAngle(referenceRight, toMouse);
-		if (angle >= 0f)
-			return referenceRight;
-		else
-			return -referenceRight;
-	}
-
-	// ⑤ 前甩(前倾)方向=与后仰相反
-	Vector2 GetReleaseWhipDirectionFromScreen()
-	{
-		return -GetChargeDirectionFromScreen();
+		delta.Normalize();
+		return (delta.x >= 0f) ? +1f : -1f;
 	}
 
 	// --------------------------- 状态实现 ---------------------------
-	void BeginCharging()
+	void TickIdle()
 	{
-		ChangePhase(Phase.Charging);
-		castTimer = 0f;
+		ropeFlightTimer = 0f;
 
 		if (chargeSlider)
 		{
@@ -471,6 +414,8 @@ public class FishingPhysics2D : MonoBehaviour
 
 		if (bobberRopeJoint)
 			bobberRopeJoint.enabled = false;
+
+		ChangePhase(Phase.Charging);
 
 		if (events?.onChargeStart != null)
 			events.onChargeStart.Invoke();
@@ -509,14 +454,9 @@ public class FishingPhysics2D : MonoBehaviour
 		// t = 蓄力幅度（0..1）
 		float ChargeAngleRatio = Mathf.Pow(Mathf.Clamp01(chargingSilderValue), Mathf.Max(1e-10f, powerCurveExponent));
 
-		// 明确计算“真正的旋转方向”（与鼠标水平相同）
-		ChargeDirection = GetChargeDirectionFromScreen();
-
 		// 规则：点左边 => 竿向左后仰；点右边 => 竿向右后仰
 		// 甩竿时根节的“后仰”动画（仅做外观过渡）
-		float targetAngle = MouseSideSignOnScreen() * Mathf.Abs(maxBackwardAngleDegrees) * ChargeAngleRatio;
-		// 可选：如果发现精灵朝向和数学正负相反，把下面这一行解注释
-		// targetDegrees = -targetDegrees;
+		float targetAngle = ((MouseSideSignOnScreen() < 0f) ? +maxBackwardAngleDegrees : -maxBackwardAngleDegrees) * ChargeAngleRatio;
 
 		if (RodLimitEnabled)
 			targetAngle = SmoothClamp(targetAngle, RotRootMinAngleLimit, RotRootMaxAngleLimit, 0.01f);
@@ -538,39 +478,34 @@ public class FishingPhysics2D : MonoBehaviour
 		whipElapsedTime = 0f;
 
 		float planned01 = Mathf.Clamp01(chargingSilderValue); // 这里就是前面读回的 UI 值
-		plannedRopeLength = Mathf.Lerp(ropeMinLength, ropeMaxLength, planned01); // 1% 就是 1%
+		plannedRopeLength = Mathf.Lerp(ropeMinLength, ropeMaxLength, planned01); //UI长 1% 就是 鱼线长 1%
 
 		if (chargeSlider)
 			StartUiFadeOut();
-
-		ChangePhase(Phase.Whip);
-
-		if (events?.onWhipBegin != null)
-			events.onWhipBegin.Invoke();
-
-		Debug.Log("[Fishing] Whip start", this);
 	}
 
-	void TickWhip(float deltaTime)
+	// 物理步里**直接**用刚体求竿梢速度（旋转→切向速度）
+	void FixedUpdate()
 	{
-		// 明确计算“真正的抛出方向”（与鼠标水平相反）
-		ReleaseWhipDirection = GetReleaseWhipDirectionFromScreen();
+		phaseMachine.FixedTick(this, Time.fixedDeltaTime);
+	}
 
-		StartPulseHingeMotorTowardMouse();
-
+	void FixedTickWhip(float fixedDeltaTime)
+	{
 		Debug.Log($"[Fishing] WHIP chargeSilderValue={chargingSilderValue:F2} plannedRopeLength={plannedRopeLength:F2}", this);
 
 		// —— 计时 & 把浮标继续“吸附在竿梢”（释放前都是整体）——
-		whipElapsedTime += deltaTime;
+		whipElapsedTime += fixedDeltaTime;
 		bobberRB.transform.localPosition = Vector3.zero;
 
-		// 竿梢的世界速度（FixedUpdate 里用 GetPointVelocity 算好的）
-		Vector2 tipVelocityWorld = tipVelocityFixed;
+		
+
+		Vector2 targetReleaseDirection = (MouseSideSignOnScreen() > 0f) ? Vector2.left : Vector2.right;
 
 		// —— 甩竿时根节的“后仰 → 前倾”动画（仅做外观过渡）——
 		if (animateRodRootInWhipEnabled && RodRootTransform)
 		{
-			float whipProgress01 = Mathf.Clamp01(whipElapsedTime / Mathf.Max(0.02f, whipPulseDuration)); // 0..1 进度
+			float whipProgress01 = Mathf.Clamp01(whipElapsedTime / Mathf.Max(0.01f, whipPulseDuration)); // 0..1 进度
 			float mouseSideSign = MouseSideSignOnScreen(); // 左(+1)/右(-1)
 			float targetRootAngle = Mathf.Lerp(
 				charingRodBackAngle, // 当前“后仰角”（充能阶段定下的）
@@ -593,249 +528,461 @@ public class FishingPhysics2D : MonoBehaviour
 		// —— 释放判定：到达“甩竿脉冲时长”后，等竿梢速度与抛掷方向至少有一定对齐度 —— //
 		if (whipElapsedTime >= whipPulseDuration)
 		{
-			// 满足“超时”，就释放；方向保持“反侧”的 castDirUnit
-			if (whipElapsedTime >= whipPulseDuration)
-			{
-				ReleaseNow(ReleaseWhipDirection, tipVelocityWorld);
-			}
+			StartCoroutine(ReleaseBobberCoroutine(targetReleaseDirection));
+
+			ChangePhase(Phase.Flight);
+			if (events?.onRelease != null)
+				events.onRelease.Invoke();
+
+			// 竿前倾保持
+			if (holdRodForwardEnabled)
+				StartCoroutine(HoldRodForwardTemporarily());
+
 			// 否则：再等一帧，让竿梢速度继续追上抛掷方向
 			// 避免 dot≈0 的软脚，导致速度丢失进而导致方向有问题
 		}
 	}
 
-	//在 Whip 开始时，给第一节鱼竿关节来一脚“马达脉冲”，把竿子朝将要甩线的方向迅速带一下，让甩竿更有力
-	void StartPulseHingeMotorTowardMouse()
+	IEnumerator ReleaseBobberCoroutine(Vector2 targetReleaseDirection)
+	{
+		yield return new WaitForFixedUpdate();
+		
+		// 竿梢的世界“真实”速度（GetPointVelocity）（由 Seg3）
+		Vector2 tipVelocityWorld = Vector2.zero;
+		if (RodSegment3RB && RodTipRB)
+		{
+			tipVelocityWorld = RodSegment3RB
+			? RodSegment3RB.GetPointVelocity(RodTipRB.position)
+			: (RodTipRB ? RodTipRB.linearVelocity : Vector2.zero);
+		}
+
+		ReleaseBobberNow(targetReleaseDirection, tipVelocityWorld);
+
+		flightSubphase = FlightSubphase.Boost;
+		flightSubphaseLockedToDescent = false;
+		bobberRB.gravityScale = flightGravityScale;
+		bobberRB.linearDamping = Mathf.Max(boostLinearDamping, 0f);
+
+		yield break;
+	}
+
+	void FixedTickCharging()
+	{
+		StartCoroutine(PulseHingeMotorTowardMouse()); // 在物理时序下开启“马达脉冲 + 等待固定步时长”的协程
+
+		ChangePhase(Phase.Whip);
+
+		if (events?.onWhipBegin != null)
+			events.onWhipBegin.Invoke();
+
+		Debug.Log("[Fishing] Whip start", this);
+	}
+
+	IEnumerator PulseHingeMotorTowardMouse()
 	{
 		if (!RodSegment1Hinge || !RodSegment1RB || !RodTipRB)
-			return;
+			yield break;
+
+		Vector2 targetReleaseDirection = (MouseSideSignOnScreen() > 0f) ? Vector2.left : Vector2.right;
 
 		// 当前轴向：第一节枢轴 -> 竿梢（单位向量）
 		Vector2 currentAxisDirection = ((Vector2)RodTipRB.position - (Vector2)RodSegment1RB.position).normalized;
 
-		// 目标轴向：已算好的“甩线方向”（与鼠标相反侧）；退化兜底为右
-		Vector2 targetAxisDirection = (ReleaseWhipDirection.sqrMagnitude > 1e-12f)
-			? ReleaseWhipDirection.normalized
-			: Vector2.right;
+		float sign = (Vector2.SignedAngle(currentMousePosition, targetReleaseDirection) > 0f) ? 1f : -1f;
 
-		// 角距离（幅值）：由两单位向量的弦长得到 θ = 2 * asin(|u - v| / 2)
-		float chordLength = (currentAxisDirection - targetAxisDirection).magnitude;          // ∈ [0, 2]
-		float angleRadians = 2f * Mathf.Asin(Mathf.Clamp01(chordLength * 0.5f));            // ∈ [0, π]
-		float angleDegrees = angleRadians * Mathf.Rad2Deg;                                   // 角度幅值（不带符号）
-
-		// 方向：用 DeltaAngle 求“最短路带符号角差”（-180°..+180°）
-		float currentAxisAngleDeg = Mathf.Atan2(currentAxisDirection.y, currentAxisDirection.x) * Mathf.Rad2Deg;
-		float targetAxisAngleDeg = Mathf.Atan2(targetAxisDirection.y, targetAxisDirection.x) * Mathf.Rad2Deg;
-		float signedShortestDeltaDegrees = Mathf.DeltaAngle(currentAxisAngleDeg, targetAxisAngleDeg); // 可能为负
-
-		// 目标角速度（度/秒）： 用“角差/脉冲时长”作为理想速度，再夹到你的最大马达速度
-		float idealSpeedDegPerSec = angleDegrees / Mathf.Max(0.02f, whipPulseDuration);
-		float maxAbsDegPerSec = Mathf.Abs(whipMotorAngularSpeed);
-		// 不用 Sign：直接用 delta 自带的正负号
-		float motorSpeedDegreesPerSec = Mathf.Clamp(
-			signedShortestDeltaDegrees / Mathf.Max(0.02f, whipPulseDuration),
-			-maxAbsDegPerSec, +maxAbsDegPerSec
-		);
-
-		// 如果角差极小，就不必抽一下马达（可选）
-		if (Mathf.Abs(signedShortestDeltaDegrees) < 0.01f)
-			return;
-
-		// 下发马达设置（注意 JointMotor2D 是 struct，改完要回写回去才生效）
+		// prepare motor (JointMotor2D is a struct -> write back)
 		var motor = RodSegment1Hinge.motor;
-		motor.motorSpeed = motorSpeedDegreesPerSec; // 正=逆时针，负=顺时针（单位：度/秒）
-		motor.maxMotorTorque = 1e6f;                    // 给足扭矩，确保能带得动
-		RodSegment1Hinge.motor = motor;              // 关键：回写
+		motor.motorSpeed = sign * Mathf.Abs(whipMotorAngularSpeed); // degrees/sec
+		motor.maxMotorTorque = 1e10f; // maxMotorTorquePulse configurable 
+		RodSegment1Hinge.motor = motor;
 		RodSegment1Hinge.useMotor = true;
 
-		// 过一个“脉冲时长”后关掉马达（避免持续驱动）
-		CancelInvoke(nameof(StopHingeMotor));
-		Invoke(nameof(StopHingeMotor), Mathf.Clamp(whipPulseDuration * 1.1f, 0.01f, 0.2f));
+		// clamp duration
+		float duration = Mathf.Clamp(whipPulseDuration, 0.0001f, 5f);
+
+		// Wait in physics ticks until accumulated fixed time >= duration
+		float elapsed = 0f;
+		while (elapsed < duration)
+		{
+			// accumulate the fixed-step time
+			elapsed += Time.fixedDeltaTime;
+			yield return new WaitForFixedUpdate();
+		}
+
+		// turn motor off / restore safe defaults
+		motor = RodSegment1Hinge.motor;
+		motor.motorSpeed = 0f;
+		motor.maxMotorTorque = 0f;
+		RodSegment1Hinge.motor = motor;
+		RodSegment1Hinge.useMotor = false;
+
+		yield break;
 	}
 
-	void StopHingeMotor()
+	// 统一设置：释放时线状态
+	void SetRopeForRelease()
 	{
-		if (RodSegment1Hinge)
-			RodSegment1Hinge.useMotor = false;
+		if (!bobberRopeJoint)
+			return;
+		bobberRopeJoint.enabled = true;
+
+		// 飞行：用“最大长度模式”，上限 = 本次上限（不突破）
+		bobberRopeJoint.maxDistanceOnly = true;
+
+		// 起步从最短（或本次上限更小者）
+		bobberRopeJoint.distance = Mathf.Min(ropeMinLength, CurrentMaxCap);
+
+		// 放线动画朝“本次上限”推进（不再用 >cap 的 slack）
+		targetRopeLength = CurrentMaxCap;
+		ropeSpoolElapsed = 0f;
 	}
 
-	void ReleaseNow(Vector2 direction, Vector2 tipVelocityWorld)
+	// 只负责：把 bobber 打出去“够猛（前向） + 够抬（向上）”
+	void ReleaseBobberNow(Vector2 directionHint, Vector2 rodTipVelocityWorld)
 	{
-		// —— 基础前向速度（解析项），保留你原来的手感参数 —— //
-		// 释义：哪怕竿梢没给力，也保证有个“往前飞”的底速
-		float baseForwardSpeed = ropeForwardFlightSpeed * Mathf.Max(0f, extraVelocityMultiplier);
+		Debug.Log($"[Fishing] RELEASE rodTipVelocityWorld={rodTipVelocityWorld.magnitude:F2}", this);
 
-		// —— 从“整体状态”解绑，进入飞行 —— //
+		// ---------- 本函数内可调常量（命名清晰，无公开字段） ----------
+		// 前向：基础底速 × 乘法增益 + 竿梢前向增益
+		const float forwardBoostMultiplier = 1.18f;   // 前向乘法增益（>1 更猛）
+		const float tipForwardGain = 1.30f;   // 竿梢前向贡献的放大系数
+		const float backwardPreserveRatio = 0.10f;   // 竿梢若反向，保留的比例（避免“过零没劲”）
+
+		// 向上：解析抛物线的竖直初速 v0y 叠加竿梢的上扬分量
+		const float ballisticUpwardBlendRatio = 0.75f;   // 解析 v0y 与“竿梢上扬”的混合占比 0..1
+		const float apexHeightAtFullChargeMeters = 2.8f;    // 满蓄力期望最高点（世界单位）
+		const float minApexAtLowChargeMeters = 0.4f;    // 低蓄力时的最低最高点（防止太平）
+		const float tipUpwardCarryRatio = 0.25f;   // 竿梢向上速度参与的系数（保留“抬头味道”）
+
+		// 形状与安全：发射最小仰角 + 速度限幅（避免极端参数爆表）
+		const float minimumLaunchAngleDegrees = 12f;     // 最小发射仰角（度）
+		const float maximumLaunchSpeedMetersPerSecond = 40f;     // 软限幅（m/s）
+
+		// ---------- 解绑整体，进入飞行的起步设定 ----------
 		DetachFromTipKeepWorld();
 		bobberRB.linearDamping = airDamping;
-		bobberRB.gravityScale = flightGravityScale;  // 抛物线感觉（顶视角/2D 也需要重力视觉） 
+		bobberRB.gravityScale = flightGravityScale; // 单刚体重力比例，会叠乘 Physics2D.gravity。:contentReference[oaicite:0]{index=0}
 
-		// —— 方向：只用“单位方向”，不改方向，只算力度 —— //
-		Vector2 useDirection = (direction.sqrMagnitude > 1e-12f) ? direction.normalized : Vector2.right;
+		// ---------- 抛掷方向（永远有兜底） ----------
+		Vector2 launchDirectionUnit =
+			(directionHint.sqrMagnitude > 1e-12f)
+				? directionHint.normalized
+				: ((MouseSideSignOnScreen() > 0f) ? Vector2.left : Vector2.right);
 
-		// —— 把竿梢速度分解到“前向/侧向”，并做一点点折算 —— //
-		// tipForwardDot：竿梢速度在抛掷方向上的投影（点积）
-		// tipSpeedSqrt  ：竿梢总速模平方
-		float tipForwardDot = Vector2.Dot(tipVelocityWorld, useDirection);
-		float tipSpeedSqrt = tipVelocityWorld.sqrMagnitude;
+		// ---------- 前向速度（猛） ----------
+		// 1) 充能 → 基础底速（m/s）
+		float charge01 = Mathf.Clamp01(chargingSilderValue);
+		float baseForwardSpeedMetersPerSecond =
+			Mathf.Lerp(minForwardSpeed, maxForwardSpeed,
+				Mathf.Pow(charge01, Mathf.Max(1e-6f, chargeToSpeedExponent)));
 
-		// 侧向分量模：|v|^2 - dot^2（数值更稳；<0 夹 0 防止浮点误差）
-		float sideSpeedSq = Mathf.Max(0f, tipSpeedSqrt - tipForwardDot * tipForwardDot);
-		float sideSpeed = Mathf.Sqrt(sideSpeedSq);
+		// 2) 额外“解析”前向底速（轻微加料，保持你原来的味道）
+		baseForwardSpeedMetersPerSecond += ropeForwardFlightSpeed * 0.15f;
 
-		// —— 手感系数（你可以在 Inspector 抽出去） —— //
-		// 给“一点反向”也少许力量（避免刚过零就‘没劲’）；侧向折一部分到前进方向（甩竿更有冲）
-		const float keepBackwardRatio = 0.15f;  // 0~0.5：反向保留几成
-		const float sideToForwardMix = 0.35f;  // 0~1  ：侧向折到前向的比例
+		// 3) 竿梢前向分量（只取在抛掷方向上的投影；若反向只保留一点点）
+		float rodTipSpeedForwardMetersPerSecond = Vector2.Dot(rodTipVelocityWorld, launchDirectionUnit);
+		float forwardFromRodTipMetersPerSecond =
+			(rodTipSpeedForwardMetersPerSecond >= 0f)
+				? rodTipSpeedForwardMetersPerSecond
+				: rodTipSpeedForwardMetersPerSecond * backwardPreserveRatio;
 
-		// 如果竿梢前向分量是反的，就只保留一小部分；否则全保留
-		float forwardFromTip = (tipForwardDot >= 0f) ? tipForwardDot : tipForwardDot * keepBackwardRatio;
+		// 4) 汇总前向：底速 + 竿梢贡献 → 乘法增益
+		float launchForwardSpeedMetersPerSecond =
+			(baseForwardSpeedMetersPerSecond + forwardFromRodTipMetersPerSecond * tipForwardGain)
+			* forwardBoostMultiplier;
 
-		// 侧向折算到前进
-		float forwardFromSide = sideSpeed * sideToForwardMix;
+		// 先得到“纯前向”的发射速度向量
+		Vector2 launchVelocity = launchDirectionUnit * Mathf.Max(0f, launchForwardSpeedMetersPerSecond);
 
-		// 合成“来自竿梢”的有效前向力度，再叠加解析前向底速
-		float effectiveTipForward = forwardFromTip + forwardFromSide;
+		// ---------- 向上分量（抬） ----------
+		// 1) 有效重力 g（m/s^2）：|Physics2D.gravity.y| × 当前刚体 gravityScale
+		float g = Mathf.Abs(Physics2D.gravity.y) * Mathf.Max(1e-6f, flightGravityScale);
 
-		// 竿梢增益：给竿梢贡献再放大一点（你原来的 tipVelocityMultiplier）
-		float tipGain = Mathf.Max(0f, tipVelocityMultiplier);
+		// 2) 目标最高点（随蓄力从 minApex 过渡到满蓄力 apex）
+		float desiredApexMeters = Mathf.Lerp(minApexAtLowChargeMeters, apexHeightAtFullChargeMeters, Mathf.Pow(charge01, 0.85f));
 
-		// 最终初速标量（沿 castDir）
-		float initialSpeedMag = effectiveTipForward * tipGain + baseForwardSpeed;
+		// 3) 解析竖直初速 v0y = sqrt(2 g h)
+		float ballisticV0yMetersPerSecond = Mathf.Sqrt(Mathf.Max(0f, 2f * g * desiredApexMeters));
 
-		// 初速度向量（只沿 castDir）
-		Vector2 initialVelocity = useDirection * Mathf.Max(0f, initialSpeedMag);
+		// 4) 竿梢上扬分量（只取向上的一部分）与解析 v0y 混合
+		float tipUpwardMetersPerSecond = Mathf.Max(0f, rodTipVelocityWorld.y) * tipUpwardCarryRatio;
+		float addUpwardMetersPerSecond = Mathf.Lerp(
+			tipUpwardMetersPerSecond,
+			tipUpwardMetersPerSecond + ballisticV0yMetersPerSecond,
+			Mathf.Clamp01(ballisticUpwardBlendRatio)
+		);
+		launchVelocity.y += addUpwardMetersPerSecond;
 
-		// 给一点“抬杆上扬”：取竿梢世界速度里的“向上分量”的一小部分
-		initialVelocity.y += Mathf.Max(0f, tipVelocityWorld.y) * 0.25f; // 0.25f 可改成 0.2~0.35f
+		// ---------- 最小仰角兜底（不改总速度幅值，只抬角度） ----------
+		if (launchVelocity.magnitude > 1e-4f)
+		{
+			float minVy = launchVelocity.magnitude * Mathf.Sin(minimumLaunchAngleDegrees * Mathf.Deg2Rad);
+			if (launchVelocity.y < minVy)
+			{
+				float newVy = minVy;
+				float newVx = Mathf.Sign(launchVelocity.x) * Mathf.Sqrt(Mathf.Max(0f, launchVelocity.magnitude * launchVelocity.magnitude - newVy * newVy));
+				launchVelocity = new Vector2(newVx, newVy);
+			}
+		}
 
-		bobberRB.linearVelocity = initialVelocity;
+		// ---------- 软限幅，防极端参数组合 ----------
+		launchVelocity = Vector2.ClampMagnitude(launchVelocity, maximumLaunchSpeedMetersPerSecond);
 
-		// —— 线控：释放时设置（本次上限=plannedRopeLength，飞行期只限制“最大距离”）—— //
+		// 写回初速度（Unity 6 用 linearVelocity）
+		bobberRB.linearVelocity = launchVelocity; // linearDamping 会随时间衰减线速度。
+
+		// ---------- 放线：本次上限 = plannedRopeLength（仅限制“最大距离”） ----------
 		castMaxLength = Mathf.Clamp(plannedRopeLength, ropeMinLength, ropeMaxLength);
-		// 这里会开启 DistanceJoint2D.maxDistanceOnly=true 的模式
-		SetRopeForRelease();
+		SetRopeForRelease(); // DistanceJoint2D.maxDistanceOnly=true ⇒ 只限制最大长度，类似悠悠球。
 
-		// —— 切换阶段/清零统计 —— //
-		ChangePhase(Phase.Flight);
-		castTimer = 0f;
-		consecutiveTautFrames = 0;
-		sawWater = false;
-		waterHitTime = 0f;
-
-		if (events?.onRelease != null)
-			events.onRelease.Invoke();
-
-		Debug.Log($"[Fishing] RELEASE vTip={tipVelocityWorld.magnitude:F2} v0={baseForwardSpeed:F2}", this);
-
-		// 抛出后短暂保持前倾（可选）
-		if (holdRodForwardEnabled)
-			HoldRodForwardTemporarily();
+		// ---------- 清零统计 & 切阶段（起飞加速期：重力=飞行重力，阻尼=最大） ----------
+		ropeFlightTimer = 0f; consecutiveTautFrames = 0; sawWater = false; waterHitTime = 0f;
 	}
 
-	void TickFlight(float deltaTome)
+	public struct FlightingBaseData
 	{
-		// 1) 放线插值推进（视觉平滑）
+		public float cap;        // 本次上限（已考虑 charge/unlimited）
+		public float tipTo;      // 竿梢->浮标 的距离
+		public bool tight;       // 是否已绷紧
+		public bool inWaterNow;  // 当前位置是否在水层
+	}
+
+	// 类内新增一个缓存字段（同一帧内跨函数复用）
+	private FlightingBaseData cachedFlightBase;
+
+	FlightingBaseData BuildFlightingBaseData()
+	{
+		var data = new FlightingBaseData();
+
+		// 统一用 Unity 6 的 API（linearVelocity / physics 2D）
+		data.cap = CurrentMaxCap;
+
+		// tip->bobber 的实时数据
+		float tipTo = 0f;
+		bool isTight = false;
+
+		if (RodTipRB && bobberRB)
+		{
+			tipTo = Vector2.Distance(RodTipRB.position, bobberRB.position);
+			isTight = bobberRopeJoint
+				? (tipTo >= (bobberRopeJoint.distance - Mathf.Abs(capTolerance)))
+				: false;
+		}
+
+		data.tipTo = tipTo;
+		data.tight = isTight;
+
+		// 图层检测：水体（你已经有 waterLayerMask）
+		data.inWaterNow = Physics2D.OverlapPoint(bobberRB.position, waterLayerMask) != null;
+
+		return data;
+	}
+
+	// 其它阶段/放线/飞行/落水
+	void FixedTickFlight(float fixedDeltaTime)
+	{
+		cachedFlightBase = BuildFlightingBaseData();
+
+		// 放线插值推进（视觉平滑）
 		if (ropeSpoolOutEnabled && bobberRopeJoint && bobberRopeJoint.maxDistanceOnly)
 		{
-			ropeSpoolElapsed += deltaTome;
+			ropeSpoolElapsed += fixedDeltaTime;
 			float newRopeLength = Mathf.Lerp(bobberRopeJoint.distance, targetRopeLength, Mathf.Clamp01(ropeSpoolElapsed / Mathf.Max(0.01f, ropeSpoolDuration)));
 			bobberRopeJoint.distance = (newRopeLength > bobberRopeJoint.distance) ? newRopeLength : bobberRopeJoint.distance; // 防回退
 		}
 
-		castTimer += deltaTome;
+		ropeFlightTimer += fixedDeltaTime;
 		if (!bobberRB || !bobberRopeJoint || !RodTipRB)
 			return;
 
-		// 2) 离屏保护（只保留一套行为：空中锁）
+		// 离屏保护（只保留一套行为：空中锁）
 		if (forceStopOffscreenEnabled && IsOffscreen(bobberRB.position, offscreenMarginRatio))
 		{
-			AirLockAtCap();
+			FixedTickCheckedLanded(1); // 等价“到cap空中锁”
 			return;
 		}
 
-		// 3) 水体命中仅做记录（放线阶段不触发落水）
+		// 水体命中仅做记录（放线阶段不触发落水）
 		bool inWaterNow = Physics2D.OverlapPoint(bobberRB.position, waterLayerMask) != null;
 		if (inWaterNow && !sawWater)
 		{
 			sawWater = true;
-			waterHitTime = castTimer;
+			waterHitTime = ropeFlightTimer;
 		}
 
-		// 4) 基础量
+		// 基础量
 		float cap = CurrentMaxCap;
 		float tipTo = Vector2.Distance(RodTipRB.position, bobberRB.position);
 		bool tight = tipTo >= bobberRopeJoint.distance - 0.01f;
 		consecutiveTautFrames = tight ? (consecutiveTautFrames + 1) : 0;
 
-		// 5) 硬封顶：distance 不得超过 cap
+		// 硬封顶：distance 不得超过 cap
 		if (bobberRopeJoint.maxDistanceOnly)
 			bobberRopeJoint.distance = Mathf.Min(bobberRopeJoint.distance, cap);
 
-		// 6) 兜底：即便关闭了 RopeSpoolOut，只要被拉紧也把 distance 往 cap 推
+		// 兜底：即便关闭了 RopeSpoolOut，只要被拉紧也把 distance 往 cap 推
 		if (!ropeSpoolOutEnabled && bobberRopeJoint.maxDistanceOnly && tight)
 		{
 			float slack = Mathf.Max(0f, ropeSpoolSlackRatio) * cap;
 			bobberRopeJoint.distance = Mathf.Min(cap, Mathf.Max(bobberRopeJoint.distance, tipTo + slack));
 		}
 
-		// 7) 放线进行中：按速度在“微重力↔飞行重力”之间平滑过渡
+		// 三段式飞行：起飞加速 → 空中匀速 → 降落加速
 		bool spoolingHard = bobberRopeJoint.maxDistanceOnly && bobberRopeJoint.distance < cap - 0.005f;
-		if (spoolingHard)
+
+		// —— 子阶段切换条件 —— //
+		if (!flightSubphaseLockedToDescent)
 		{
-			// 起飞的前几帧：先用正常重力，保证一上来就有弧线
-			if (castTimer < 0.06f) // 2~3 帧即可
+			// 起飞 → 匀速：满足最低飞行时间，速度达到阈值
+			if (flightSubphase == FlightSubphase.Boost)
 			{
-				bobberRB.gravityScale = flightGravityScale;
-				return;
+				bool boostTimeOk = ropeFlightTimer >= Mathf.Max(0.01f, flightBoostDuration);
+				bool speedOk = bobberRB.linearVelocity.magnitude >= Mathf.Max(0f, cruiseEnterSpeed);
+				if (boostTimeOk && speedOk)
+					flightSubphase = FlightSubphase.Cruise;
 			}
 
-			// 基于速度做重力比例：v >= vHi -> 更接近 micro；v <= vLo -> 更接近 flight
-			// 不新增公开字段，这里用 ropeForwardFlightSpeed 推出两个本地阈值
-			float v = bobberRB.linearVelocity.magnitude;
-			const float vHiRatio = 0.90f;  // 高速阈值：越接近 1 越苛刻
-			const float vLoRatio = 0.60f;  // 低速阈值：越接近 0 越宽松
-			float vHi = Mathf.Max(0.10f, ropeForwardFlightSpeed * vHiRatio);
-			float vLo = Mathf.Max(0.05f, ropeForwardFlightSpeed * vLoRatio);
+			// 匀速 → 降落：出现较明显“向下速度”或接近 cap 或刚入水后稳定
+			if (flightSubphase == FlightSubphase.Cruise)
+			{
+				bool goingDownFast = bobberRB.linearVelocity.y <= -Mathf.Abs(descentEnterDownSpeed);
+				bool waterSettle = sawWater && (ropeFlightTimer - waterHitTime) >= Mathf.Max(0f, waterLandingSettleDelay) * 0.5f;
 
-			// t=0 用 flightGravity，t=1 用 microGravity；用你已有的 Smooth01C3 做顺滑
-			float tLinear = Mathf.InverseLerp(vLo, vHi, v);     // 0..1（速度越快越接近 1）
-			float tSmooth = Smooth01C3(Mathf.Clamp01(tLinear)); // 平滑曲线，避免重力突变
-
-			float g = Mathf.Lerp(flightGravityScale, Mathf.Max(0f, spoolingMicroGravityScale), tSmooth);
-			bobberRB.gravityScale = g;
-
-			// 放线期仍跳过落水逻辑
-			return;
+				if (goingDownFast || (tipTo >= cap - capTolerance) || waterSettle)
+				{
+					flightSubphase = FlightSubphase.Descent;
+					flightSubphaseLockedToDescent = true;
+				}
+			}
 		}
 
-		// 放线结束：恢复飞行重力（若未锁）
-		if (!isAirLocked)
-			bobberRB.gravityScale = flightGravityScale;
+		// —— 根据子阶段设置重力/阻尼（并在“放线中”对重力做微调）—— //
+		switch (flightSubphase)
+		{
+			case FlightSubphase.Boost:
+				// 起飞：正常飞行重力 + 最大阻尼，前段弧线立刻可见
+				bobberRB.gravityScale = flightGravityScale;
+				bobberRB.linearDamping = Mathf.Max(boostLinearDamping, 0f);
+				// 若仍在“硬放线”，前 2~3 帧允许直接 return，保持你原逻辑的“起弧”
+				if (ropeFlightTimer < Mathf.Max(0.02f, Mathf.Min(0.06f, flightBoostDuration)))
+					return;
+				break;
 
-		// 8) 到达 cap：以真实距离判定并空中锁
-		bool nearCap = tipTo >= cap - capTolerance;
-		if (stopAtCapInAirEnabled && nearCap && castTimer >= ropeMinFlightTime)
+			case FlightSubphase.Cruise:
+				// 匀速：微重力 + 中等阻尼
+				if (spoolingHard)
+				{
+					// 放线阶段：把重力从 flight → micro 平滑插值（速度越快越接近 micro）
+					float v = bobberRB.linearVelocity.magnitude;
+					float vHi = Mathf.Max(0.10f, ropeForwardFlightSpeed * 0.90f);
+					float vLo = Mathf.Max(0.05f, ropeForwardFlightSpeed * 0.30f);
+					float tSmooth = Smooth01C3(Mathf.Clamp01(Mathf.InverseLerp(vLo, vHi, v)));
+					float g = Mathf.Lerp(flightGravityScale, Mathf.Max(0f, spoolingMicroGravityScale), tSmooth);
+					bobberRB.gravityScale = g;
+					// 仍跳过落水
+					bobberRB.linearDamping = Mathf.Max(cruiseLinearDamping, 0f);
+				}
+				else
+				{
+					// 放线结束：常态微重力
+					bobberRB.gravityScale = Mathf.Max(0f, spoolingMicroGravityScale);
+					bobberRB.linearDamping = Mathf.Max(cruiseLinearDamping, 0f);
+				}
+				break;
+
+			case FlightSubphase.Descent:
+				// 降落：重力加强（加速向下改变姿态）+ 最小阻尼（不“拖死”）
+				bobberRB.gravityScale = flightGravityScale * Mathf.Max(0.01f, descentGravityMultiplier);
+				bobberRB.linearDamping = Mathf.Max(descentLinearDamping, 0f);
+				break;
+		}
+
+		// 放在 FixedTickFlight 的结尾做个轻量日志（必要时再关）
+		if ((int)(ropeFlightTimer * 60) % 6 == 0) // 每6帧采样一次
+		{
+			Debug.LogWarning($"[Flight] sub={flightSubphase} gScale={bobberRB.gravityScale:F3} " +
+					  $"v=({bobberRB.linearVelocity.x:F2},{bobberRB.linearVelocity.y:F2}) " +
+					  $"dist={Vector2.Distance(RodTipRB.position, bobberRB.position):F2} " +
+					  $"rope={bobberRopeJoint.distance:F2}/{CurrentMaxCap:F2}");
+		}
+	}
+
+	bool ShouldForceLand(bool inWaterNow, bool tight, bool inward, bool slowInWater)
+	{
+		bool timeout = ropeFlightTimer >= ropeFlightMaxTimeout;
+
+		if (landOnlyOnWaterEnabled)
+		{
+			if (!inWaterNow)
+				return false;
+
+			bool settleOk = sawWater && (ropeFlightTimer - waterHitTime) >= Mathf.Max(0f, waterLandingSettleDelay);
+			// 只在“绷紧或超时”并且水面稳定后才落水
+			return settleOk && (tight || timeout);
+		}
+		else
+		{
+			return (tight && ropeFlightTimer >= ropeMinFlightTime) || timeout;
+		}
+	}
+
+	int FixedTickCheckLanded(in FlightingBaseData cacheData)
+	{
+		// 早退：组件未就绪
+		if (!bobberRB || !bobberRopeJoint || !RodTipRB)
+			return 0;
+
+		// 空中锁：到达 cap 且满足最小飞行时长
+		if (stopAtCapInAirEnabled && (cacheData.tipTo >= cacheData.cap - Mathf.Abs(capTolerance)) && ropeFlightTimer >= ropeMinFlightTime)
+			return 1;
+
+		// 非水早落水（允许时）：绷紧达到阈值且飞行时间达标
+		if (!landOnlyOnWaterEnabled && consecutiveTautFrames >= Mathf.Max(1, tautFramesThresholdToLand) && ropeFlightTimer >= ropeMinFlightTime)
+			return 2;
+
+		// 水面稳定落水：仍然需要 inward/slowInWater（它们只在这里用，算一次即可）
+		bool inward = Vector2.Dot(RodTipRB.position - bobberRB.position, bobberRB.linearVelocity) > 0f || bobberRB.linearVelocity.sqrMagnitude < 0.0003f;
+		bool slowInWater = bobberRB.linearVelocity.sqrMagnitude <= waterLockSpeedThreshold * waterLockSpeedThreshold;
+
+		if (ShouldForceLand(cacheData.inWaterNow, cacheData.tight, inward, slowInWater))
+			return 2;
+
+		// 允许随时收线
+		if (canReelAnytime)
+			return 3;
+
+		return 0;
+	}
+
+	void FixedTickCheckedLanded(int state)
+	{
+		if (state == 1)
 		{
 			AirLockAtCap();
-			return;
-		}
+			ChangePhase(Phase.Landed);
+			if (events?.onLand != null)
+				events.onLand.Invoke();
 
-		// 9) 允许“非水面早落水”才走这一支
-		if (!landOnlyOnWaterEnabled && consecutiveTautFrames >= Mathf.Max(1, tautFramesThresholdToLand) && castTimer >= ropeMinFlightTime)
-		{
-			LockRopeAtCurrentAndWaterDamping(); // 老的“落入水/地”锁法
-			return;
+			Debug.Log($"[Fishing] AIR-LOCK cap={cachedFlightBase.tipTo:F2} tipTo={cachedFlightBase.cap:F2}", this);
 		}
-
-		// 10) 水面落水（稳定后判定）
-		Vector2 toTip = RodTipRB.position - bobberRB.position;
-		bool inward = Vector2.Dot(toTip, bobberRB.linearVelocity) > 0f
-					|| bobberRB.linearVelocity.sqrMagnitude < 0.0004f;
-		bool slowInWater = bobberRB.linearVelocity.sqrMagnitude <= waterLockSpeedThreshold * waterLockSpeedThreshold;
-		if (ShouldForceLand(inWaterNow, tight, inward, slowInWater))
+		else if (state == 2)
 		{
 			LockRopeAtCurrentAndWaterDamping();
-			return;
+
+			ChangePhase(Phase.Landed);
+			if (events?.onLand != null)
+				events.onLand.Invoke();
+
+			if (snapRodOnLandEnabled)
+				RestoreRodPoseOnly();
+
+			Debug.Log($"[Fishing] LANDED lockLength={Vector2.Distance(RodTipRB.position, bobberRB.position):F2}", this);
+		}
+		else if (state == 3)
+		{
+			LockRopeAtCurrentAndWaterDamping();
+			FixedTickLanded();
+			Debug.Log("[Fishing] To reel from Flight (anytime during spooling)", this);
 		}
 	}
 
@@ -852,9 +999,8 @@ public class FishingPhysics2D : MonoBehaviour
 	{
 		if (!bobberRB || !RodTipRB) return;
 
-		float cap = CurrentMaxCap;
 		float tipTo = Vector2.Distance(RodTipRB.position, bobberRB.position);
-		float clamped = Mathf.Clamp(tipTo, ropeMinLength, cap);
+		float clamped = Mathf.Clamp(tipTo, ropeMinLength, CurrentMaxCap);
 
 		// 固定在当前长度；视觉上仍能画线
 		if (bobberRopeJoint)
@@ -872,8 +1018,6 @@ public class FishingPhysics2D : MonoBehaviour
 		bobberRB.bodyType = RigidbodyType2D.Kinematic;
 
 		isAirLocked = true;
-		ChangePhase(Phase.Landed); // 此时左键可开始收线
-		Debug.Log($"[Fishing] AIR-LOCK cap={cap:F2} tipTo={tipTo:F2}", this);
 	}
 
 	void LockRopeAtCurrentAndWaterDamping()
@@ -895,47 +1039,9 @@ public class FishingPhysics2D : MonoBehaviour
 		bobberRB.angularVelocity = 0f;
 		bobberRB.linearDamping = waterDamping;
 		bobberRB.gravityScale = 0f;
-
-		ChangePhase(Phase.Landed);
-
-		maxCastDistance = Mathf.Max(maxCastDistance, cur);
-
-		if (events?.onLand != null)
-			events.onLand.Invoke();
-
-		if (snapRodOnLandEnabled)
-			RestoreRodPoseOnly();
-
-		Debug.Log($"[Fishing] LANDED lockLen={cur:F2}", this);
 	}
 
-	void TryBeginReelFromFlight()
-	{
-		if (!Input.GetMouseButtonDown(0) || currentPhase != Phase.Flight || bobberRopeJoint == null || RodTipRB == null)
-			return;
-
-		if (canReelAnytime)
-		{
-			// 直接强制落水并开始收线
-			LockRopeAtCurrentAndWaterDamping();
-			BeginReel();
-			Debug.Log("[Fishing] Begin reel from Flight (anytime)", this);
-			return;
-		}
-
-		// 原有逻辑：超时且已绷紧
-		if (castTimer < ropeMinFlightTime) 
-			return;
-
-		if (Vector2.Distance(RodTipRB.position, bobberRB.position) < 0.01f) 
-			return; // 未绷紧
-
-		LockRopeAtCurrentAndWaterDamping();
-		BeginReel();
-		Debug.Log("[Fishing] Begin reel from Flight (tight & timeout)", this);
-	}
-
-	void BeginReel()
+	void FixedTickLanded()
 	{
 		if (isAirLocked)
 		{
@@ -952,53 +1058,19 @@ public class FishingPhysics2D : MonoBehaviour
 			isAirLocked = false;
 		}
 
+		if (bobberRopeJoint)
+			bobberRopeJoint.maxDistanceOnly = false; // 绝对长度模式：distance 变短会“拖回来”
+
 		ChangePhase(Phase.Reeling);
-		if (bobberRopeJoint) bobberRopeJoint.maxDistanceOnly = false; // 绝对长度模式：distance 变短会“拖回来”
-		if (events?.onReelStart != null) events.onReelStart.Invoke();
+		if (events?.onReelStart != null)
+			events.onReelStart.Invoke();
 		Debug.Log("[Fishing] Reel start", this);
 	}
 
-	// 统一设置：释放时线状态（使用精简参数）
-	void SetRopeForRelease()
-	{
-		if (!bobberRopeJoint) 
-			return;
-		bobberRopeJoint.enabled = true;
-
-		// 飞行：用“最大长度模式”，上限 = 本次上限（不突破）
-		bobberRopeJoint.maxDistanceOnly = true;
-
-		// 起步从最短（或本次上限更小者）
-		bobberRopeJoint.distance = Mathf.Min(ropeMinLength, CurrentMaxCap);
-
-		// 放线动画朝“本次上限”推进（不再用 >cap 的 slack）
-		targetRopeLength = CurrentMaxCap;
-		ropeSpoolElapsed = 0f;
-	}
-
-	bool ShouldForceLand(bool inWaterNow, bool tight, bool inward, bool slowInWater)
-	{
-		bool timeout = castTimer >= ropeFlightMaxTimeout;
-
-		if (landOnlyOnWaterEnabled)
-		{
-			if (!inWaterNow)
-				return false;
-
-			bool settleOk = sawWater && (castTimer - waterHitTime) >= Mathf.Max(0f, waterLandingSettleDelay);
-			// 只在“绷紧或超时”并且水面稳定后才落水
-			return settleOk && (tight || timeout);
-		}
-		else
-		{
-			return (tight && castTimer >= ropeMinFlightTime) || timeout;
-		}
-	}
-
-	void TickReeling(float dt)
+	void FixedTickReeling(float fixedDeltaTime)
 	{
 		if (bobberRopeJoint)
-			bobberRopeJoint.distance = Mathf.Max(0f, bobberRopeJoint.distance - Mathf.Max(0f, reelDistancePerSecond) * dt);
+			bobberRopeJoint.distance = Mathf.Max(0f, bobberRopeJoint.distance - Mathf.Max(0f, reelDistancePerSecond) * fixedDeltaTime);
 
 		if (RodTipRB && bobberRB)
 		{
@@ -1172,6 +1244,7 @@ public class FishingPhysics2D : MonoBehaviour
 
 		// —— 取消任何延迟/Invoke/协程（StopHingeMotor、ReleaseHoldRodForward 等）—— //
 		CancelInvoke();
+		StopAllCoroutines();
 
 		hingeHoldActive = false; // 防止误判
 
@@ -1181,7 +1254,7 @@ public class FishingPhysics2D : MonoBehaviour
 		ResetHinge(RodSegment3Hinge);
 
 		// —— 基本标量清零 —— //
-		castTimer = 0f;
+		ropeFlightTimer = 0f;
 		plannedRopeLength = 0f;
 
 		isUiFading = false;
@@ -1189,8 +1262,6 @@ public class FishingPhysics2D : MonoBehaviour
 
 		whipElapsedTime = 0f;
 		consecutiveTautFrames = 0;
-
-		tipVelocityFixed = Vector2.zero;
 
 		castMaxLength = 0f;
 		isAirLocked = false;
@@ -1307,51 +1378,68 @@ public class FishingPhysics2D : MonoBehaviour
 		RodRootTransform.localRotation = RodRootHomeRotation * Quaternion.Euler(0f, 0f, backAngle);
 	}
 
-	// --------------------------- 竿前倾保持 ---------------------------
-	void HoldRodForwardTemporarily()
+	// --------------------------- 竿前倾保持（真正的窄窗口 + 干净收尾） ---------------------------
+	IEnumerator HoldRodForwardTemporarily()
 	{
-		if (!RodSegment1Hinge || hingeHoldActive) 
-			return;
+		if (!RodSegment1Hinge || hingeHoldActive)
+			yield break;
 
-		// 记录当前设置
+		// 备份
 		hingePrevUseLimits = RodSegment1Hinge.useLimits;
 		hingePrevUseMotor = RodSegment1Hinge.useMotor;
 		hingePrevLimits = RodSegment1Hinge.limits;
 		hingePrevMotor = RodSegment1Hinge.motor;
 
-		// 以释放瞬间角度为中心，设置窄窗口的角度限制
-		float baseAngle = Mathf.Clamp(RodSegment1Hinge.jointAngle, RotRootMinAngleLimit, RotRootMaxAngleLimit); // 当前角度（度）
+		// 局部工具：尽力恢复（如果铰链还活着）
+		void RestoreIfPossible()
+		{
+			if (RodSegment1Hinge)
+			{
+				RodSegment1Hinge.useLimits = hingePrevUseLimits;
+				RodSegment1Hinge.limits = hingePrevLimits;
+				RodSegment1Hinge.useMotor = hingePrevUseMotor;
+				RodSegment1Hinge.motor = hingePrevMotor;
+			}
+			hingeHoldActive = false;
+		}
+
+		// 设置“窄窗口”
+		const float holdWindowHalfDeg = 6f;
+		float curDeg = Mathf.Clamp(RodSegment1Hinge.jointAngle, RotRootMinAngleLimit, RotRootMaxAngleLimit);
 		var limits = new JointAngleLimits2D
 		{
-			min = RotRootMinAngleLimit,
-			max = RotRootMaxAngleLimit
+			min = Mathf.Max(RotRootMinAngleLimit, curDeg - holdWindowHalfDeg),
+			max = Mathf.Min(RotRootMaxAngleLimit, curDeg + holdWindowHalfDeg),
 		};
 
-		RodSegment1Hinge.useMotor = false; // 停止进一步驱动，避免与限制冲突
-		RodSegment1Hinge.limits = limits; // 必须先设置 limits 再启用 useLimits
-		RodSegment1Hinge.useLimits = true;
-
+		RodSegment1Hinge.useMotor = false;
+		RodSegment1Hinge.limits = limits;   // 先数值
+		RodSegment1Hinge.useLimits = true;     // 再启用
 		hingeHoldActive = true;
-		Invoke(nameof(ReleaseHoldRodForward), Mathf.Clamp(holdForwardDuration, 0.05f, 2.0f));
+
+		// 物理时间等待
+		float duration = Mathf.Clamp(holdForwardDuration, 0.05f, 2.0f);
+		int steps = Mathf.CeilToInt(duration / Time.fixedDeltaTime);
+
+		for (int i = 0; i < steps; i++)
+		{
+			// 如果铰链对象没了，无法恢复，直接退出
+			if (!RodSegment1Hinge) 
+				yield break;
+
+			// 外部取消（把 hingeHoldActive 设回 false）——立即恢复然后退出
+			// 阶段改变（例如已不在 Flight）——恢复后提前结束（可按需改成继续等）
+			if (!hingeHoldActive || currentPhase != Phase.Flight)
+			{
+				RestoreIfPossible();
+				yield break;
+			}
+			yield return new WaitForFixedUpdate();
+		}
+
+		// 正常到时：恢复
+		RestoreIfPossible();
 	}
-
-	void ReleaseHoldRodForward()
-	{
-		if (!RodSegment1Hinge || !hingeHoldActive) 
-			return;
-
-		// 恢复原始设置
-		RodSegment1Hinge.useLimits = hingePrevUseLimits;
-		RodSegment1Hinge.limits = hingePrevLimits;
-		RodSegment1Hinge.useMotor = hingePrevUseMotor;
-		RodSegment1Hinge.motor = hingePrevMotor;
-
-		hingeHoldActive = false;
-
-		// 保险：确保完全关闭
-		ResetHinge(RodSegment1Hinge);
-	}
-
 
 	// --------------------------- 视觉线 ---------------------------
 	void ConfigureLineRenderer()
@@ -1520,44 +1608,120 @@ public class FishingPhysics2D : MonoBehaviour
 		}
 	}
 
-	// --------------------------- 有限状态机（同文件内隔离） ---------------------------
+	// --------------------------- 有限状态机（仅替换这一段） ---------------------------
 	public class PhaseMachine
 	{
-		public Phase current;
-		public void Init(Phase initial) 
+		private Phase current;
+
+		// 只承载“离散请求”的标志；由 Update 产出，FixedUpdate 消费
+		private bool whipRequested;   // MouseUp 后请求进入甩竿（在 Fixed 中启动马达脉冲协程）
+		private bool landedRequested;
+		private bool reelRequested;   // 落水后点击开始收线
+
+		public void Init(Phase initial)
 		{
 			current = initial;
+			ClearRequests();
 		}
-		public void Set(Phase next) 
+
+		public void Set(Phase next)
 		{
 			current = next;
+			// 进入任一新阶段后，旧请求一律清空，避免脏请求串场
+			ClearRequests();
 		}
+
+		void ClearRequests()
+		{
+			whipRequested = false;
+			landedRequested = false;
+			reelRequested = false;
+		}
+
+		// ---- 生产者：只读输入 / 驱动非物理UI；不要在这里做物理 ----
 		public void Tick(FishingPhysics2D context, float deltaTime)
 		{
 			switch (current)
 			{
 				case Phase.Idle:
 					if (Input.GetMouseButtonDown(0))
-						context.BeginCharging();
+					{
+						context.TickIdle(); // 这里内部会 ChangePhase -> Charging（UI/外观 OK）
+					}
 					break;
+
 				case Phase.Charging:
-					context.TickCharging(deltaTime);
+					context.TickCharging(deltaTime); // UI/角度过渡等视觉无物理
 					if (Input.GetMouseButtonUp(0))
-						context.TickCharging();
+					{
+						context.TickCharging(); // 计算 plannedRopeLength、UI 渐隐
+						whipRequested = true;  // 仅发请求：在 Fixed 中启动马达脉冲协程
+					}
 					break;
-				case Phase.Whip:
-					context.TickWhip(deltaTime);
-					break;
+
 				case Phase.Flight:
-					context.TickFlight(deltaTime);
-					context.TryBeginReelFromFlight();
+					if (Input.GetMouseButtonDown(0))
+						landedRequested = true;
+					break;
+
+				case Phase.Landed:
+					if (Input.GetMouseButtonDown(0))
+						reelRequested = true; // 仅发请求：在 Fixed 中切到 Reeling
+					break;
+
+					// Whip / Flight / Reeling：连续物理阶段，不在 Update 做任何门控
+			}
+		}
+
+		// ---- 消费者：所有物理都在这里按固定步执行 ----
+		public void FixedTick(FishingPhysics2D context, float fixedDeltaTime)
+		{
+			switch (current)
+			{
+				case Phase.Charging:
+					if (whipRequested)
+					{
+						whipRequested = false; // 立刻清零，避免重复起协程
+						context.FixedTickCharging();
+					}
+					break;
+
+				case Phase.Whip:
+					// 连续物理：每个 FixedUpdate 都要推进甩竿计时与“是否到点释放”
+					context.FixedTickWhip(fixedDeltaTime);
+					break;
+
+				case Phase.Flight:
+					context.FixedTickFlight(fixedDeltaTime); // 里面已更新 cachedFlightBase
+
+					int landingDecision = context.FixedTickCheckLanded(in context.cachedFlightBase);
+
+					// 自动落地/空锁：立刻处理并退出本帧
+					if (landingDecision == 1 || landingDecision == 2)
+					{
+						context.FixedTickCheckedLanded(landingDecision);
+						return;
+					}
+
+					// “随时可收” 只在点击后触发
+					if (landedRequested && landingDecision == 3)
+					{
+						landedRequested = false;
+						context.FixedTickCheckedLanded(landingDecision);
+						return;
+					}
 					break;
 				case Phase.Landed:
-					if (Input.GetMouseButtonDown(0)) 
-						context.BeginReel();
+					if (reelRequested)
+					{
+						reelRequested = false;
+						context.FixedTickLanded(); // 转 Reeling（内部会 ChangePhase）
+					}
 					break;
+
 				case Phase.Reeling:
-					context.TickReeling(deltaTime);
+					// 连续物理：每个 FixedUpdate 收线、加拉力、结束判定
+					context.FixedTickReeling(fixedDeltaTime);
 					break;
 			}
 		}
