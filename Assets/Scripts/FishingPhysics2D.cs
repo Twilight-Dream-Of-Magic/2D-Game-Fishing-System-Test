@@ -39,7 +39,7 @@ public class FishingPhysics2D : MonoBehaviour
 
 	[Header("Drag (Unity 6 uses Damping)")]
 	public float airDamping = 0.1f;
-	public float waterDamping = 4.5f;
+	public float waterDamping = 2f;
 
 	[Header("Reel Tuning")]
 	[Tooltip("distance 每秒缩短量")]
@@ -212,6 +212,23 @@ public class FishingPhysics2D : MonoBehaviour
 
 	[Tooltip("离屏时是否直接空中锁死")]
 	public bool forceStopOffscreenEnabled = true;
+
+
+	[Header("Scripted Arc (No-Physics)")]
+	public bool scriptedArcReleaseEnabled = true;
+
+	[Tooltip("低/满蓄力：每米线长对应的目标水平速度 m/s per meter")]
+	public float scriptedSpeedPerM_Low = 1f;
+	public float scriptedSpeedPerM_High = 4f;
+	public float scriptedSpeedFloor = 3.5f;
+
+	[Tooltip("控制点相对总程的占比（决定‘前期上抛/中段趋平/后期下压’）")]
+	[Range(0.05f, 0.45f)] public float c1Along = 0.22f;   // P1 的水平位置 = 22% * D
+	[Range(0.55f, 0.95f)] public float c2Along = 0.78f;   // P2 的水平位置 = 78% * D
+	[Tooltip("P1 竖直抬高（米，随蓄力&后仰插值）")] public float c1UpMin = 0.15f, c1UpMax = 1.0f;
+	[Tooltip("P2 竖直抬高（米，通常远小于P1以制造平台段）")] public float c2UpMin = 0.02f, c2UpMax = 0.25f;
+
+	[Tooltip("最短/最长飞行时间（秒），用于限速防穿越")] public float scriptedMinTime = 0.25f, scriptedMaxTime = 1.10f;
 
 	// ------------------------- 内部状态 -------------------------
 	public enum Phase { Idle, Charging, Whip, Flight, Landed, Reeling }
@@ -553,8 +570,6 @@ public class FishingPhysics2D : MonoBehaviour
 		// —— 动画通知到了：在“物理步”里真正释放 —— //
 		whipAnimationDone = false;
 
-		Vector2 targetReleaseDirection =
-			(MouseSideSignOnScreen() > 0f) ? Vector2.left : Vector2.right;
 		// ★ 用差分窗口估计的竿梢有效速度（Transform 驱动也能抓到）
 		Vector2 tipVelocityFromSamples = ComputeRodTipVelocityFromWindow();
 
@@ -564,9 +579,12 @@ public class FishingPhysics2D : MonoBehaviour
 		Vector2 tipVelocityForRelease = (tipVelocityFromRigidBody.sqrMagnitude > tipVelocityFromSamples.sqrMagnitude)
 									  ? tipVelocityFromRigidBody : tipVelocityFromSamples;
 
-		ReleaseBobberNow(targetReleaseDirection, tipVelocityForRelease);
-
 		ChangePhase(Phase.Flight);
+		if (scriptedArcReleaseEnabled)
+			ReleaseBobberNowScriptedArc();
+		else
+			ReleaseBobberNow(tipVelocityForRelease);
+
 		events?.onRelease?.Invoke();
 
 		flightSubphase = FlightSubphase.Boost;
@@ -654,12 +672,12 @@ public class FishingPhysics2D : MonoBehaviour
 
 
 	// 只负责：把浮标打出去「水平很强（左右明确）+ 上抛合理」，必要时叠加竿梢“味道”
-	void ReleaseBobberNow(Vector2 directionHint, Vector2 rodTipVelocityWorld)
+	void ReleaseBobberNow(Vector2 rodTipVelocityWorld)
 	{
 		// ===================== 可调常量（仅本函数内） =====================
 		// —— 水平（左右）——
 		// “按计划线长换算”的水平速度斜率（低蓄力→满蓄力），单位：(m/s) / 计划米数
-		const float horizontalSpeedPerMeterAtLowCharge = 5.0f;   // 蓄力=0
+		const float horizontalSpeedPerMeterAtLowCharge = 20.0f;   // 蓄力=0
 		const float horizontalSpeedPerMeterAtFullCharge = 50.0f;  // 蓄力=1  想更远就加大
 		const float horizontalSpeedFloor = 1.0f;   // 无论如何至少这么快（m/s）
 
@@ -669,10 +687,10 @@ public class FishingPhysics2D : MonoBehaviour
 
 		// —— 竖直（上抛）——
 		// 用“期望最高点”反解 v0y：h = v0y^2/(2g)
-		const float apexLowChargeMeters = 1f;   // 蓄力=0 的顶点高度
-		const float apexFullChargeMeters = 5f;   // 蓄力=1 的顶点高度
+		const float apexLowChargeMeters = 0.01f;   // 蓄力=0 的顶点高度
+		const float apexFullChargeMeters = 1f;   // 蓄力=1 的顶点高度
 		const float apexBlendExponent = 0.75f;  // 0..∞（>1 偏硬）
-		const float tipUpwardCarryScale = 0.6f;  // 叠加竿梢向上的那一部分
+		const float tipUpwardCarryScale = 0.1f;  // 叠加竿梢向上的那一部分
 
 		// —— 形状保护 —— 
 		const float minimumLaunchAngleDegrees = 20f;    // 兜底最小仰角，防“太扁”
@@ -755,6 +773,106 @@ public class FishingPhysics2D : MonoBehaviour
 		// 放线与状态维持（沿用你原来的）
 		castMaxLength = Mathf.Clamp(plannedRopeLength, ropeMinLength, ropeMaxLength);
 		ropeFlightTimer = 0f; consecutiveTautFrames = 0; sawWater = false; waterHitTime = 0f;
+	}
+
+	// —— 数学：三次贝塞尔与一阶导数（B 和 B'）——
+	// ---------- Bezier 工具 ----------
+	static Vector2 CubicBezierPoint(in Vector2 p0, in Vector2 p1, in Vector2 p2, in Vector2 p3, float t)
+	{
+		float u = 1f - t;
+		return (u * u * u) * p0 + 3f * (u * u * t) * p1 + 3f * (u * t * t) * p2 + (t * t * t) * p3;   // B(t)
+	}
+	static Vector2 CubicBezierTangent(in Vector2 p0, in Vector2 p1, in Vector2 p2, in Vector2 p3, float t)
+	{
+		float u = 1f - t;
+		return 3f * (u * u) * (p1 - p0) + 6f * u * t * (p2 - p1) + 3f * (t * t) * (p3 - p2);       // B'(t)
+	}
+
+	// ---------- 释放：脚本化弧线（不受力） ----------
+	void ReleaseBobberNowScriptedArc()
+	{
+		// 1) 从竿梢解绑，Kinematic 驱动（不受重力/阻尼）
+		DetachFromTipKeepWorld();
+		bobberRB.bodyType = RigidbodyType2D.Kinematic;
+		bobberRB.gravityScale = 0f;
+		bobberRB.linearDamping = 0f;
+
+		// 2) 起点/方向/总程
+		Vector2 startPos = RodTipRB ? (Vector2)RodTipRB.position : (Vector2)transform.position;
+		float charge01 = Mathf.Clamp01(chargingSilderValue);
+
+		// ★ 方向保持你的约定：右边→向左甩；左边→向右甩（不要改）
+		Vector2 throwAxis = (MouseSideSignOnScreen() > 0f) ? Vector2.left : Vector2.right;
+
+		// 后仰幅度（0..1）影响射程（“越后仰越远”）
+		float backLean01 = Mathf.InverseLerp(0f, Mathf.Max(1e-3f, maxBackwardAngleDegrees), Mathf.Abs(charingRodBackAngle));
+		float plannedDistance = Mathf.Clamp(plannedRopeLength, ropeMinLength, CurrentMaxCap);
+		float totalDistance = plannedDistance * Mathf.Lerp(0.90f, 1.25f, backLean01);
+
+		// 3) 终点：按水平位移在水层上取高度
+		float endX = startPos.x + throwAxis.x * totalDistance;
+		Vector2 rayTop = new Vector2(endX, startPos.y + 30f);
+		RaycastHit2D hit = Physics2D.Raycast(rayTop, Vector2.down, 60f, waterLayerMask);
+		float endY = hit ? hit.point.y : (startPos.y - 0.3f);
+		Vector2 endPos = new Vector2(endX, endY);
+
+		// 4) 控制点：ctrl1 抬得高、ctrl2 轻抬，形成“微上抛→近水平→末段下压”
+		float ctrl1LiftY = Mathf.Lerp(c1UpMin, c1UpMax, Mathf.Pow(charge01, 0.7f)) * Mathf.Lerp(0.7f, 1.2f, backLean01);
+		float ctrl2LiftY = Mathf.Lerp(c2UpMin, c2UpMax, Mathf.Pow(charge01, 0.5f));
+		Vector2 ctrl1Pos = startPos + throwAxis * (totalDistance * Mathf.Clamp01(c1Along)) + Vector2.up * ctrl1LiftY;
+		Vector2 ctrl2Pos = startPos + throwAxis * (totalDistance * Mathf.Clamp01(c2Along)) + Vector2.up * ctrl2LiftY;
+
+		// 5) 目标速度（m/s）：随蓄力×射程映射；后续用等弧长近似推进
+		float speedPerMeter = Mathf.Lerp(scriptedSpeedPerM_Low, scriptedSpeedPerM_High, charge01);
+		float targetSpeedMps = Mathf.Max(scriptedSpeedFloor, speedPerMeter * totalDistance);
+		float minFlightSec = Mathf.Clamp(scriptedMinTime, 0.05f, 5f);
+		float maxFlightSec = Mathf.Clamp(scriptedMaxTime, 0.05f, 10f);
+
+		// 6) 启动脚本推进
+		StartCoroutine(ScriptedArcRoutine(startPos, ctrl1Pos, ctrl2Pos, endPos, targetSpeedMps, minFlightSec, maxFlightSec));
+
+		// 7) 记录cap/计时/视觉线（仅“最大长度”，不牵引浮标）
+		castMaxLength = Mathf.Clamp(plannedRopeLength, ropeMinLength, ropeMaxLength);
+		ropeFlightTimer = 0f; consecutiveTautFrames = 0; sawWater = false; waterHitTime = 0f;
+		if (bobberRopeJoint) { bobberRopeJoint.enabled = false; bobberRopeJoint.maxDistanceOnly = true; }
+
+		// 空中到 cap 不锁
+		stopAtCapInAirEnabled = false;
+
+		Debug.Log($"[Fishing] RELEASE-SCRIPTED |dist|={totalDistance:F2} speed={targetSpeedMps:F1} ctrl1+{ctrl1LiftY:F2} ctrl2+{ctrl2LiftY:F2}", this);
+	}
+
+	// ---------- 协程：沿 B(t) 以近似匀速推进 ----------
+	IEnumerator ScriptedArcRoutine(
+		Vector2 startPos, Vector2 ctrl1Pos, Vector2 ctrl2Pos, Vector2 endPos,
+		float targetSpeedMps, float minFlightSec, float maxFlightSec)
+	{
+		float t = 0f, elapsed = 0f;
+
+		while (t < 1f && currentPhase == Phase.Flight && bobberRB)
+		{
+			// 用 |B'(t)| 做步长修正：Δt ≈ v * Δtime / |B'(t)|
+			Vector2 tangent = CubicBezierTangent(startPos, ctrl1Pos, ctrl2Pos, endPos, t);
+			float tangentLen = Mathf.Max(0.001f, tangent.magnitude);
+			float dt = (targetSpeedMps * Time.fixedDeltaTime) / tangentLen;
+			t += dt;
+
+			Vector2 nextPos = CubicBezierPoint(startPos, ctrl1Pos, ctrl2Pos, endPos, Mathf.Min(1f, t));
+			bobberRB.MovePosition(nextPos);  // Kinematic + MovePosition = 不受重力/阻尼，按物理步移动。:contentReference[oaicite:1]{index=1}
+
+			// 命中水即锁（给一点最短飞行时间，避免贴着脚下立刻落）
+			elapsed += Time.fixedDeltaTime;
+			bool inWater = Physics2D.OverlapPoint(nextPos, waterLayerMask);
+			if ((inWater && elapsed >= minFlightSec) || elapsed >= maxFlightSec)
+				break;
+
+			yield return new WaitForFixedUpdate();
+		}
+
+		// 到终点/进水：走你的落水上锁逻辑（固定长度 + 水阻尼）
+		LockRopeAtCurrentAndWaterDamping();
+		ChangePhase(Phase.Landed);
+		events?.onLand?.Invoke();
 	}
 
 	public struct FlightingBaseData
@@ -894,7 +1012,7 @@ public class FishingPhysics2D : MonoBehaviour
 				bobberRB.gravityScale = flightGravityScale * gravityScaleBoost;
 				bobberRB.linearDamping = Mathf.Max(linearDampingBoost, 0f);
 				// 起飞头几帧直接 return，给“起弧”时间
-				if (ropeFlightTimer < Mathf.Min(0.08f, Mathf.Max(0.02f, flightBoostDuration))) 
+				if (ropeFlightTimer < Mathf.Min(0.08f, Mathf.Max(0.02f, flightBoostDuration)))
 					return;
 				break;
 
